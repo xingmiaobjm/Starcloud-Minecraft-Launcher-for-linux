@@ -262,7 +262,9 @@ export function ProgressBar(props: {
 
 export interface MenuEntry {
   label: string
-  onSelect: () => void
+  onSelect?: () => void
+  /** 分隔线（Win MenuFlyoutSeparator）：label 留空且 separator=true */
+  separator?: boolean
   danger?: boolean
   disabled?: boolean
 }
@@ -270,6 +272,7 @@ export interface MenuEntry {
 /**
  * 右键菜单 hook（Win 端 MenuFlyout 等价）。
  * 用法：const menu = useContextMenu(items)；<div {...menu.bind()}>…</div>
+ * 也可以程序化打开（行内「…」按钮共用同一菜单）：menu.open(x, y)。
  * 菜单在视口边缘自动翻转，避免被窗口裁掉（Win 端 Flyout 的 PopupPlacement 行为）。
  */
 export function useContextMenu(items: MenuEntry[]): {
@@ -277,6 +280,7 @@ export function useContextMenu(items: MenuEntry[]): {
     onContextMenu: (e: React.MouseEvent) => void
     style: React.CSSProperties
   }
+  open: (x: number, y: number) => void
   close: () => void
   node: JSX.Element | null
 } {
@@ -307,7 +311,8 @@ export function useContextMenu(items: MenuEntry[]): {
   }, [pos])
 
   const width = 200
-  const height = items.length * 32 + 12
+  const visible = items.filter((i) => !i.separator)
+  const height = visible.length * 32 + (items.length - visible.length) * 9 + 12
   const flipX = pos !== null && pos.x > window.innerWidth - width - 12
   const flipY = pos !== null && pos.y > window.innerHeight - height - 12
 
@@ -325,23 +330,32 @@ export function useContextMenu(items: MenuEntry[]): {
           display: 'flex',
           flexDirection: 'column',
           gap: 2,
-          padding: 6
+          padding: 6,
+          // 不透明底：半透明 + 大模糊会把下层文字透上来（与 Select 弹层同一处理）
+          background: 'var(--surface-window)'
         }}
       >
-        {items.map((item) => (
-          <button
-            key={item.label}
-            className={`nav-item${item.danger === true ? ' btn-danger' : ''}`}
-            style={{ height: 32, width: '100%', fontSize: 13 }}
-            disabled={item.disabled === true}
-            onClick={() => {
-              setPos(null)
-              item.onSelect()
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
+        {items.map((item, i) =>
+          item.separator === true ? (
+            <div
+              key={`sep${i}`}
+              style={{ height: 1, background: 'var(--stroke-default)', margin: '3px 6px' }}
+            />
+          ) : (
+            <button
+              key={item.label}
+              className={`nav-item${item.danger === true ? ' btn-danger' : ''}`}
+              style={{ height: 32, width: '100%', fontSize: 13 }}
+              disabled={item.disabled === true}
+              onClick={() => {
+                setPos(null)
+                item.onSelect?.()
+              }}
+            >
+              {item.label}
+            </button>
+          )
+        )}
       </div>
     )
 
@@ -349,10 +363,12 @@ export function useContextMenu(items: MenuEntry[]): {
     bind: () => ({
       onContextMenu: (e: React.MouseEvent): void => {
         e.preventDefault()
+        e.stopPropagation()
         setPos({ x: e.clientX, y: e.clientY })
       },
       style: {}
     }),
+    open: (x: number, y: number): void => setPos({ x, y }),
     close: (): void => setPos(null),
     node
   }

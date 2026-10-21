@@ -37,6 +37,8 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
   const session = useGameSession()
   const taskCenter = useTaskCenter()
   const [tasksOpen, setTasksOpen] = useState(false)
+  // 「问 Nova」的预填文本（版本行菜单 → Nova 页自动填入输入框）
+  const [novaSeed, setNovaSeed] = useState('')
 
   // 启动时应用一次视觉设置（动效档位 / 背景），之后由设置页即时更新
   useEffect(() => {
@@ -93,8 +95,15 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
       case 'versions':
         return (
           <VersionsPage
-            onOpenDetail={(id) => setPage('versions')}
-            onOpenSettings={() => setPage('settings')}
+            onLaunch={(id) => {
+              // Win 同款：菜单「启动」= 选中该版本回首页，由首页的启动按钮发起
+              session.setVersion(id)
+              setPage('home')
+            }}
+            onAskNova={(id) => {
+              setNovaSeed(`帮我给 ${id} 做一次游戏体检，有隐患直接说`)
+              setPage('nova')
+            }}
           />
         )
       case 'download':
@@ -114,7 +123,7 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
       case 'plugins':
         return <PluginsPage />
       case 'nova':
-        return <NovaPage />
+        return <NovaPage seed={novaSeed} />
       case 'logs':
         return <LogsPage session={session} />
       case 'settings':

@@ -324,13 +324,16 @@ function registerIpc(): void {
     await shell.openExternal(parsed.toString())
   })
 
-  // 导入本地皮肤：系统文件选择框（比让用户手敲绝对路径可靠）
-  ipcMain.handle('dialog:pickFile', async (_e, title: unknown) => {
+  // 导入本地皮肤 / 整合包：系统文件选择框（比让用户手敲绝对路径可靠）
+  ipcMain.handle('dialog:pickFile', async (_e, title: unknown, filters: unknown) => {
     const win = mainWindow
     const options: Electron.OpenDialogOptions = {
       title: typeof title === 'string' && title !== '' ? title : '选择文件',
       properties: ['openFile'],
-      filters: [{ name: 'PNG 图片', extensions: ['png'] }]
+      filters:
+        Array.isArray(filters) && filters.length > 0
+          ? (filters as Electron.FileFilter[])
+          : [{ name: 'PNG 图片', extensions: ['png'] }]
     }
     const result =
       win !== null
@@ -339,6 +342,34 @@ function registerIpc(): void {
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
   })
+
+  // 整合包导出：系统保存对话框（filters: [{name, extensions}]）
+  ipcMain.handle(
+    'dialog:pickSaveFile',
+    async (
+      _e,
+      title: unknown,
+      defaultName: unknown,
+      filters: unknown
+    ) => {
+      const win = mainWindow
+      const options: Electron.SaveDialogOptions = {
+        title: typeof title === 'string' && title !== '' ? title : '保存文件',
+        defaultPath:
+          typeof defaultName === 'string' && defaultName !== '' ? defaultName : undefined,
+        filters:
+          Array.isArray(filters) && filters.length > 0
+            ? (filters as Electron.FileFilter[])
+            : undefined
+      }
+      const result =
+        win !== null
+          ? await dialog.showSaveDialog(win, options)
+          : await dialog.showSaveDialog(options)
+      if (result.canceled || result.filePath === undefined) return null
+      return result.filePath
+    }
+  )
 
   // 渲染层定好主题后回传窗口底色，避免缩放时露出另一套主题的底
   ipcMain.on('theme:set-background', (_e, dark: boolean) => {

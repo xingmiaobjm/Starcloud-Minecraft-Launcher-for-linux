@@ -47,7 +47,7 @@ interface ChatMessage {
   plan?: NovaPlanItem[]
 }
 
-export default function NovaPage(): JSX.Element {
+export default function NovaPage(props: { seed?: string }): JSX.Element {
   const { push, host } = useToasts()
   const [config, setConfig] = useState<NovaConfig>({ baseUrl: '', apiKey: '', model: '' })
   const [draft, setDraft] = useState<NovaConfig>({ baseUrl: '', apiKey: '', model: '' })
@@ -64,6 +64,11 @@ export default function NovaPage(): JSX.Element {
   const seq = useRef(1)
   const streamingId = useRef<number | null>(null)
   const bodyRef = useRef<HTMLDivElement | null>(null)
+
+  // 「问 Nova」等入口带来的预填文本（Win 端 NovaRuntime.RequestInput 的等价物）
+  useEffect(() => {
+    if (props.seed !== undefined && props.seed !== '') setInput(props.seed)
+  }, [props.seed])
 
   const loadConfig = useCallback(async (): Promise<void> => {
     try {

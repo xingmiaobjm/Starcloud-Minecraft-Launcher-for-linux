@@ -54,8 +54,18 @@ const native = {
   skinIcon: (path: string): Promise<string> => ipcRenderer.invoke('skin:icon', path),
   /** 用系统默认浏览器打开链接（微软设备码的验证站点）。 */
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
-  /** 系统文件选择框；用户取消返回 null。 */
-  pickFile: (title: string): Promise<string | null> => ipcRenderer.invoke('dialog:pickFile', title)
+  /** 系统文件选择框；用户取消返回 null。filters 可选（默认 PNG）。 */
+  pickFile: (
+    title: string,
+    filters?: Array<{ name: string; extensions: string[] }>
+  ): Promise<string | null> => ipcRenderer.invoke('dialog:pickFile', title, filters ?? []),
+  /** 系统保存对话框（整合包导出）；用户取消返回 null。 */
+  pickSaveFile: (
+    title: string,
+    defaultName: string,
+    filters?: Array<{ name: string; extensions: string[] }>
+  ): Promise<string | null> =>
+    ipcRenderer.invoke('dialog:pickSaveFile', title, defaultName, filters ?? [])
 }
 
 contextBridge.exposeInMainWorld('bridge', bridge)

@@ -1,10 +1,13 @@
-/// 版本页：对齐 Win 端 VersionsPage —— 顶部工具栏（游戏目录 / 导入 / 搜索 / 类别 / 刷新）
-/// + 满高卡片列表（方块图标、类型与隔离芯片、两行数据列、更多菜单、删除）。
-import { useEffect, useMemo, useState } from 'react'
+/// 版本页：对齐 Win 端 VersionsPage —— 顶部工具栏 + 满高卡片列表 +
+/// 行右键 / 「…」共用的完整行菜单（Win 0.3.7 同款 13 项）：
+/// 启动 / 版本详情 / 三个文件夹入口 · 重命名 / 复制版本 / 导出整合包 /
+/// 导入整合包 / 从链接导入 / 备份与回档 · 问 Nova / 删除。
+/// 整合包导出导入与备份走桥接（versions.export*/import*/backup*），进度走 modpack.progress 事件。
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { request } from '../bridge'
+import { nativeApi, onBridgeEvent, request } from '../bridge'
 import type { InstalledVersion } from '../bridge'
-import { EmptyState, Modal, SkeletonList, useToasts, Select } from '../ui'
+import { EmptyState, Modal, ProgressBar, SkeletonList, useToasts, Select, useContextMenu } from '../ui'
 import VersionDetailPage from './VersionDetail'
 
 import grassIcon from '../assets/mc-icons/natural_grass_block.png'
@@ -104,11 +107,63 @@ function sortVersions(list: InstalledVersion[]): InstalledVersion[] {
   })
 }
 
+// ── 整合包 / 备份的数据形状（桥接 versions.* 返回体） ────────────────────────
+
+interface PackDir {
+  name: string
+  fileCount: number
+  totalBytes: number
+  standard: boolean
+}
+
+interface ExportProbe {
+  versionId: string
+  gameVersion: string
+  dependencies: Record<string, string>
+  loader: string
+  dirs: PackDir[]
+}
+
+interface PackPreview {
+  format: string
+  name: string
+  gameVersion: string
+  dependencies: Record<string, string>
+  loader: string
+  fileCount: number
+  totalBytes: number
+  contentRoot: string
+}
+
+interface BackupEntry {
+  id: string
+  version_id: string
+  name: string
+  created_at: string
+  size_bytes: number
+  file_count: number
+  zip_path: string
+  includes: string[]
+}
+
+const FORMAT_LABEL: Record<string, string> = {
+  modrinth: 'Modrinth 整合包',
+  curseforge: 'CurseForge 整合包',
+  multimc: 'MultiMC / Prism 实例包',
+  raw: '通用压缩包'
+}
+
+/** 版本名合法性（与桥接 IsValidVersionId 同规则：非空且不含路径非法字符）。 */
+function validVersionId(name: string): boolean {
+  return name.trim().length > 0 && !/[<>:"/\\|?*]/.test(name)
+}
+
 export default function VersionsPage(props: {
-  onOpenDetail: (id: string) => void
-  onOpenSettings: () => void
+  onLaunch: (id: string) => void
+  onAskNova: (id: string) => void
 }): JSX.Element {
   const { push, host } = useToasts()
+  const nat = nativeApi()
   const [items, setItems] = useState<InstalledVersion[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -116,8 +171,92 @@ export default function VersionsPage(props: {
   const [gameDir, setGameDir] = useState('')
   const [query, setQuery] = useState('')
   const [kindFilter, setKindFilter] = useState('全部')
-  const [menuFor, setMenuFor] = useState<InstalledVersion | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
+
+  // ── 行菜单（Win 端 RowMenu：右键与「…」按钮共用） ──
+  const [menuRow, setMenuRow] = useState<InstalledVersion | null>(null)
+  const menuRef = useRef<InstalledVersion | null>(null)
+  menuRef.current = menuRow
+  const menu = useContextMenu([
+    { label: '启动', onSelect: () => menuRef.current !== null && props.onLaunch(menuRef.current.id) },
+    { label: '版本详情', onSelect: () => menuRef.current !== null && setOpenId(menuRef.current.id) },
+    {
+      label: '打开版本文件夹',
+      onSelect: () => void openFolders(menuRef.current, 'version')
+    },
+    { label: '打开存档文件夹', onSelect: () => void openFolders(menuRef.current, 'saves') },
+    { label: '打开模组文件夹', onSelect: () => void openFolders(menuRef.current, 'mods') },
+    { label: '', separator: true },
+    { label: '重命名', onSelect: () => openRename(menuRef.current) },
+    { label: '复制版本', onSelect: () => openCopy(menuRef.current) },
+    { label: '导出整合包', onSelect: () => void openExport(menuRef.current) },
+    { label: '导入整合包', onSelect: () => void pickAndPreview() },
+    { label: '从链接导入', onSelect: () => setLinkOpen(true) },
+    { label: '备份与回档', onSelect: () => void openBackup(menuRef.current) },
+    { label: '', separator: true },
+    { label: '问 Nova', onSelect: () => menuRef.current !== null && props.onAskNova(menuRef.current.id) },
+    {
+      label: '删除',
+      danger: true,
+      onSelect: () => menuRef.current !== null && setConfirm(menuRef.current)
+    }
+  ])
+
+  // ── 重命名 / 复制 ──
+  const [rename, setRename] = useState<{ id: string; name: string } | null>(null)
+  const [renameBusy, setRenameBusy] = useState(false)
+  const [copy, setCopy] = useState<{ id: string; name: string; isolated: boolean } | null>(null)
+  const [copyContent, setCopyContent] = useState(false)
+  const [copyBusy, setCopyBusy] = useState(false)
+
+  // ── 导出 ──
+  const [exportProbe, setExportProbe] = useState<ExportProbe | null>(null)
+  const [exportFormat, setExportFormat] = useState('modrinth')
+  const [exportName, setExportName] = useState('')
+  const [exportPkgVer, setExportPkgVer] = useState('1.0.0')
+  const [exportAuthor, setExportAuthor] = useState('')
+  const [exportDesc, setExportDesc] = useState('')
+  const [exportMc, setExportMc] = useState('')
+  const [exportLoaderKey, setExportLoaderKey] = useState('none')
+  const [exportLoaderVer, setExportLoaderVer] = useState('')
+  const [exportDirs, setExportDirs] = useState<Set<string>>(new Set())
+  const [exportExclude, setExportExclude] = useState('')
+  const [exportBusy, setExportBusy] = useState(false)
+  const [progress, setProgress] = useState<{ stage: string; percent: number } | null>(null)
+
+  // ── 导入（文件 / 链接共用预览弹窗） ──
+  const [importPack, setImportPack] = useState<{ path: string; preview: PackPreview } | null>(null)
+  const [importName, setImportName] = useState('')
+  const [importIsolated, setImportIsolated] = useState(true)
+  const [importMc, setImportMc] = useState('')
+  const [importBusy, setImportBusy] = useState(false)
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkUrl, setLinkUrl] = useState('')
+  const [linkBusy, setLinkBusy] = useState(false)
+
+  // ── 备份与回档 ──
+  const [backupFor, setBackupFor] = useState<InstalledVersion | null>(null)
+  const [backupEntries, setBackupEntries] = useState<BackupEntry[]>([])
+  const [backupDirs, setBackupDirs] = useState<Set<string>>(new Set())
+  const [backupSaves, setBackupSaves] = useState(true)
+  const [backupBusy, setBackupBusy] = useState(false)
+
+  // modpack.progress 事件 → 打开的弹窗里显示
+  useEffect(() => {
+    onBridgeEvent((event, params) => {
+      if (event !== 'modpack.progress') return
+      setProgress({ stage: String(params.stage ?? ''), percent: Number(params.percent ?? -1) })
+    })
+  }, [])
+
+  const loadBackupList = useCallback(async (versionId: string): Promise<void> => {
+    try {
+      const r = await request<{ entries: BackupEntry[] }>('versions.backupList', { versionId })
+      setBackupEntries(r.entries)
+    } catch {
+      setBackupEntries([])
+    }
+  }, [])
 
   async function reload(): Promise<void> {
     setLoading(true)
@@ -161,10 +300,12 @@ export default function VersionsPage(props: {
     }
   }
 
-  async function openVersionFolder(v: InstalledVersion): Promise<void> {
+  /** 行菜单的三个文件夹入口（Win OpenFolder_Click：跟随实例根，缺目录就建）。 */
+  async function openFolders(v: InstalledVersion | null, kind: string): Promise<void> {
+    if (v === null) return
     setBusy(v.id)
     try {
-      await request('versions.openFolder', { versionId: v.id })
+      await request('versions.openFolder', { versionId: v.id, kind })
     } catch (e) {
       push('error', String(e))
     } finally {
@@ -172,17 +313,300 @@ export default function VersionsPage(props: {
     }
   }
 
-  async function setDefault(v: InstalledVersion): Promise<void> {
-    setBusy(v.id)
+  function openRename(v: InstalledVersion | null): void {
+    if (v === null) return
+    setRename({ id: v.id, name: v.id })
+  }
+
+  async function doRename(): Promise<void> {
+    if (rename === null || renameBusy) return
+    const newName = rename.name.trim()
+    if (!validVersionId(newName)) return
+    setRenameBusy(true)
     try {
-      await request('versions.setDefault', { versionId: v.id })
-      push('success', `已将 ${v.id} 设为默认版本`)
+      await request('versions.rename', { versionId: rename.id, newName })
+      push('success', `已重命名为 ${newName}`)
+      setRename(null)
       await reload()
     } catch (e) {
-      push('error', String(e))
-    } finally {
-      setBusy(null)
+      push('error', `重命名失败：${String(e)}`)
     }
+    setRenameBusy(false)
+  }
+
+  function openCopy(v: InstalledVersion | null): void {
+    if (v === null) return
+    setCopyContent(false)
+    setCopy({ id: v.id, name: `${v.id}-copy`, isolated: v.isolated === true })
+  }
+
+  async function doCopy(): Promise<void> {
+    if (copy === null || copyBusy) return
+    const newId = copy.name.trim()
+    if (!validVersionId(newId)) return
+    setCopyBusy(true)
+    try {
+      await request('versions.copy', { versionId: copy.id, newId, copyContent })
+      push('success', `已复制为 ${newId}`)
+      setCopy(null)
+      await reload()
+    } catch (e) {
+      push('error', `复制失败：${String(e)}`)
+    }
+    setCopyBusy(false)
+  }
+
+  // ── 导出整合包（Win ModPackExportDialog 的字段与流程） ──
+
+  async function openExport(v: InstalledVersion | null): Promise<void> {
+    if (v === null) return
+    setBusy(v.id)
+    try {
+      const probe = await request<ExportProbe>('versions.exportProbe', { versionId: v.id })
+      const loaderKey = ['fabric-loader', 'quilt-loader', 'forge', 'neoforge'].find(
+        (k) => probe.dependencies[k] !== undefined
+      )
+      setExportProbe(probe)
+      setExportFormat('modrinth')
+      setExportName(v.id)
+      setExportPkgVer('1.0.0')
+      setExportAuthor('')
+      setExportDesc('')
+      setExportMc(probe.gameVersion)
+      setExportLoaderKey(loaderKey ?? 'none')
+      setExportLoaderVer(loaderKey !== undefined ? (probe.dependencies[loaderKey] ?? '') : '')
+      setExportDirs(new Set(probe.dirs.filter((d) => d.standard).map((d) => d.name)))
+      setExportExclude('')
+    } catch (e) {
+      push('error', String(e))
+    }
+    setBusy(null)
+  }
+
+  function applyExportPreset(want: (name: string) => boolean): void {
+    setExportProbe((prev) => {
+      if (prev === null) return prev
+      setExportDirs(new Set(prev.dirs.filter((d) => want(d.name)).map((d) => d.name)))
+      return prev
+    })
+  }
+
+  async function doExport(): Promise<void> {
+    const probe = exportProbe
+    if (probe === null || exportBusy || nat === null) return
+    if (exportDirs.size === 0) {
+      push('info', '请至少勾选一个内容目录。')
+      return
+    }
+    const ext = exportFormat === 'modrinth' ? 'mrpack' : 'zip'
+    const kindLabel = FORMAT_LABEL[exportFormat] ?? '整合包'
+    const stamp = new Date()
+    const pad = (n: number): string => n.toString().padStart(2, '0')
+    const suggested = `${probe.versionId}-${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}`
+    const outPath = await nat.pickSaveFile('导出整合包', suggested, [
+      { name: kindLabel, extensions: [ext] }
+    ])
+    if (outPath === null) return
+    setExportBusy(true)
+    setProgress(null)
+    const dependencies: Record<string, string> = { minecraft: exportMc.trim() }
+    if (exportLoaderKey !== 'none' && exportLoaderVer.trim() !== '') {
+      dependencies[exportLoaderKey] = exportLoaderVer.trim()
+    }
+    try {
+      const r = await request<{
+        downloadableFiles: number
+        overriddenFiles: number
+        skippedFiles: number
+        totalBytes: number
+        loaderWarning?: string
+      }>('versions.exportModpack', {
+        versionId: probe.versionId,
+        outPath,
+        format: exportFormat,
+        name: exportName.trim() === '' ? probe.versionId : exportName.trim(),
+        packageVersion: exportPkgVer.trim() === '' ? '1.0.0' : exportPkgVer.trim(),
+        author: exportAuthor.trim(),
+        description: exportDesc.trim(),
+        gameVersion: exportMc.trim(),
+        dependencies,
+        dirs: [...exportDirs],
+        excludeRules: exportExclude
+          .split('\n')
+          .map((s) => s.trim())
+          .filter((s) => s !== ''),
+        includeGameSettings: false,
+        unresolvedAsOverrides: true
+      })
+      let msg = `${kindLabel} · 可下载 ${r.downloadableFiles} 个 · 打包 ${r.overriddenFiles} 个 · 共 ${fmtSize(r.totalBytes)}`
+      if (r.skippedFiles > 0) msg += `\n按排除规则跳过 ${r.skippedFiles} 个文件。`
+      if (r.loaderWarning !== undefined && r.loaderWarning !== '') msg += `\n\n提示：${r.loaderWarning}`
+      msg += `\n\n已保存到：${outPath}`
+      push('success', msg)
+      setExportProbe(null)
+    } catch (e) {
+      push('error', `导出失败：${String(e)}`)
+    }
+    setExportBusy(false)
+    setProgress(null)
+  }
+
+  // ── 导入整合包（文件 / 链接都汇到同一个预览弹窗，Win RunImportAsync 同款字段） ──
+
+  async function pickAndPreview(): Promise<void> {
+    if (nat === null) {
+      push('info', '整合包导入需要桌面端（文件选择框不可用）')
+      return
+    }
+    const path = await nat.pickFile('选择整合包', [
+      { name: '整合包（.mrpack / .zip）', extensions: ['mrpack', 'zip'] }
+    ])
+    if (path === null) return
+    await previewPack(path)
+  }
+
+  async function previewPack(packPath: string): Promise<void> {
+    setBusy('import')
+    setProgress(null)
+    try {
+      const preview = await request<PackPreview>('versions.packPreview', { packPath })
+      setImportPack({ path: packPath, preview })
+      setImportName(preview.name)
+      setImportIsolated(true)
+      setImportMc(preview.gameVersion)
+    } catch (e) {
+      push('error', `无法导入整合包：${String(e)}`)
+    }
+    setBusy(null)
+  }
+
+  async function doImport(): Promise<void> {
+    const pack = importPack
+    if (pack === null || importBusy) return
+    const targetId = importName.trim()
+    if (!validVersionId(targetId)) {
+      push('info', '版本名不能为空，且不能包含 < > : " / \\ | ? *')
+      return
+    }
+    if (pack.preview.format === 'raw' && importMc.trim() === '') {
+      push('info', '请填写 Minecraft 版本，例如 1.20.1')
+      return
+    }
+    setImportBusy(true)
+    setProgress(null)
+    try {
+      const r = await request<{ targetId: string; renamed: boolean; isolated: boolean; summary: string }>(
+        'versions.importPack',
+        {
+          packPath: pack.path,
+          targetId,
+          isolated: importIsolated,
+          mcVersion: pack.preview.format === 'raw' ? importMc.trim() : undefined,
+          contentRoot: pack.preview.contentRoot
+        }
+      )
+      let msg = r.isolated ? `已创建版本「${r.targetId}」。\n${r.summary}` : `已写入共享 .minecraft 目录。\n${r.summary}`
+      if (r.renamed) msg += '\n（同名版本已存在，已自动改名）'
+      push('success', msg)
+      setImportPack(null)
+      await reload()
+    } catch (e) {
+      push('error', `导入失败：${String(e)}`)
+    }
+    setImportBusy(false)
+    setProgress(null)
+  }
+
+  async function doLinkImport(): Promise<void> {
+    const url = linkUrl.trim()
+    if (url === '' || linkBusy || nat === null) return
+    setLinkBusy(true)
+    setProgress(null)
+    try {
+      const r = await request<{ url: string; fileName: string }>('versions.resolvePackLink', { url })
+      const dl = await request<{ path: string; fileName: string }>('versions.downloadPack', {
+        url: r.url,
+        fileName: r.fileName
+      })
+      setLinkOpen(false)
+      setLinkUrl('')
+      setLinkBusy(false)
+      await previewPack(dl.path)
+      return
+    } catch (e) {
+      push('error', `下载失败：${String(e)}`)
+    }
+    setLinkBusy(false)
+    setProgress(null)
+  }
+
+  // ── 备份与回档（Win ModPackDialogs.BackupAsync：粒度 + 列表内回档/删除） ──
+
+  async function openBackup(v: InstalledVersion | null): Promise<void> {
+    if (v === null) return
+    setBusy(v.id)
+    setBackupFor(v)
+    setBackupSaves(true)
+    setBackupBusy(false)
+    try {
+      const probe = await request<ExportProbe>('versions.exportProbe', { versionId: v.id })
+      const names = probe.dirs.filter((d) => d.standard && d.name !== 'saves').map((d) => d.name)
+      setBackupDirs(new Set(names))
+    } catch {
+      setBackupDirs(new Set(['mods', 'config']))
+    }
+    await loadBackupList(v.id)
+    setBusy(null)
+  }
+
+  async function doBackup(): Promise<void> {
+    const v = backupFor
+    if (v === null || backupBusy) return
+    setBackupBusy(true)
+    setProgress(null)
+    try {
+      await request('versions.backupCreate', {
+        versionId: v.id,
+        dirs: [...backupDirs],
+        includeSaves: backupSaves
+      })
+      push('success', `已备份 ${v.id}`)
+      await loadBackupList(v.id)
+    } catch (e) {
+      push('error', `备份失败：${String(e)}`)
+    }
+    setBackupBusy(false)
+    setProgress(null)
+  }
+
+  async function restoreBackup(entry: BackupEntry): Promise<void> {
+    const v = backupFor
+    if (v === null || backupBusy) return
+    if (!window.confirm(`确定回档到「${entry.name}」吗？当前状态会先自动备份一份（安全网）。`)) return
+    setBackupBusy(true)
+    setProgress(null)
+    try {
+      await request('versions.backupRestore', { entryId: entry.id, versionId: v.id })
+      push('success', `已回档到「${entry.name}」`)
+    } catch (e) {
+      push('error', `回档失败：${String(e)}`)
+    }
+    setBackupBusy(false)
+    setProgress(null)
+  }
+
+  async function deleteBackup(entry: BackupEntry): Promise<void> {
+    const v = backupFor
+    if (v === null || backupBusy) return
+    if (!window.confirm(`确定删除备份「${entry.name}」？此操作不可撤销。`)) return
+    setBackupBusy(true)
+    try {
+      await request('versions.backupDelete', { entryId: entry.id })
+      await loadBackupList(v.id)
+    } catch (e) {
+      push('error', String(e))
+    }
+    setBackupBusy(false)
   }
 
   async function remove(v: InstalledVersion): Promise<void> {
@@ -201,6 +625,16 @@ export default function VersionsPage(props: {
   if (openId !== null) {
     return <VersionDetailPage versionId={openId} onBack={() => setOpenId(null)} />
   }
+
+  const progressBlock =
+    progress !== null ? (
+      <div style={{ marginTop: 10 }}>
+        <div className="t-cap" style={{ marginBottom: 6 }}>
+          {progress.stage}
+        </div>
+        <ProgressBar value={progress.percent >= 0 ? progress.percent : undefined} indeterminate={progress.percent < 0} />
+      </div>
+    ) : null
 
   return (
     <div className="page">
@@ -224,18 +658,10 @@ export default function VersionsPage(props: {
             {gameDir === '' ? '游戏目录' : gameDir}
           </span>
         </div>
-        <button
-          className="btn"
-          onClick={() => push('info', '整合包导入：内核能力接入后可用')}
-          title="导入整合包"
-        >
+        <button className="btn" onClick={() => void pickAndPreview()} title="导入整合包">
           <IconImport size={15} /> 导入整合包
         </button>
-        <button
-          className="btn"
-          onClick={() => push('info', '从链接导入：内核能力接入后可用')}
-          title="从链接导入"
-        >
+        <button className="btn" onClick={() => setLinkOpen(true)} title="从链接导入">
           从链接导入
         </button>
         <input
@@ -280,7 +706,15 @@ export default function VersionsPage(props: {
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'auto minmax(120px, 260px) minmax(0, 1fr) auto auto auto',
-                columnGap: 12
+                columnGap: 12,
+                cursor: 'default'
+              }}
+              onContextMenu={(e) => {
+                // Win 同款：行上右键弹 RowMenu
+                e.preventDefault()
+                e.stopPropagation()
+                setMenuRow(v)
+                menu.open(e.clientX, e.clientY)
               }}
               onClick={() => setOpenId(v.id)}
             >
@@ -306,7 +740,9 @@ export default function VersionsPage(props: {
                 disabled={busy !== null}
                 onClick={(e) => {
                   e.stopPropagation()
-                  setMenuFor(v)
+                  setMenuRow(v)
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                  menu.open(r.right - 200, r.bottom + 6)
                 }}
               >
                 <IconMore size={16} />
@@ -327,53 +763,413 @@ export default function VersionsPage(props: {
         </div>
       </div>
 
-      {/* 更多菜单 */}
+      {/* 行右键菜单（Win RowMenu 同款条目与分组） */}
+      {menu.node}
+
+      {/* 重命名 */}
       <Modal
-        open={menuFor !== null}
-        title={menuFor?.id ?? ''}
-        onClose={() => setMenuFor(null)}
+        open={rename !== null}
+        title="重命名版本"
+        onClose={() => setRename(null)}
+        width={420}
         footer={
-          <button className="btn" onClick={() => setMenuFor(null)}>
-            关闭
-          </button>
+          <>
+            <button className="btn" onClick={() => setRename(null)}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={renameBusy || !validVersionId(rename?.name ?? '')}
+              onClick={() => void doRename()}
+            >
+              重命名
+            </button>
+          </>
         }
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <button
-            className="btn"
-            onClick={() => {
-              const v = menuFor
-              setMenuFor(null)
-              if (v !== null) void openVersionFolder(v)
-            }}
-          >
-            打开版本目录
-          </button>
-          <button
-            className="btn"
-            disabled={menuFor?.isDefault === true}
-            onClick={() => {
-              const v = menuFor
-              setMenuFor(null)
-              if (v !== null) void setDefault(v)
-            }}
-          >
-            设为默认版本
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              const v = menuFor
-              setMenuFor(null)
-              if (v !== null) setOpenId(v.id)
-            }}
-          >
-            版本详情
-          </button>
-          <button className="btn" onClick={() => props.onOpenSettings()}>
-            实例设置
-          </button>
+        <input
+          className="input"
+          placeholder="新的版本名"
+          value={rename?.name ?? ''}
+          onChange={(e) => setRename((prev) => (prev === null ? prev : { ...prev, name: e.target.value }))}
+        />
+        {!validVersionId(rename?.name ?? '') && (
+          <div className="t-cap" style={{ marginTop: 8, color: 'var(--danger)' }}>
+            版本名不能为空，且不能包含 {'< > : " / \\ | ? *'}
+          </div>
+        )}
+      </Modal>
+
+      {/* 复制版本 */}
+      <Modal
+        open={copy !== null}
+        title="复制版本"
+        onClose={() => setCopy(null)}
+        width={440}
+        footer={
+          <>
+            <button className="btn" onClick={() => setCopy(null)}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={copyBusy || !validVersionId(copy?.name ?? '')}
+              onClick={() => void doCopy()}
+            >
+              复制
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <input
+            className="input"
+            placeholder={`例如 ${copy?.id ?? '版本'}-copy`}
+            value={copy?.name ?? ''}
+            onChange={(e) => setCopy((prev) => (prev === null ? prev : { ...prev, name: e.target.value }))}
+          />
+          {copy?.isolated === true && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={copyContent}
+                onChange={(e) => setCopyContent(e.target.checked)}
+              />
+              同时复制 mods / 存档等隔离内容
+            </label>
+          )}
         </div>
+      </Modal>
+
+      {/* 导出整合包 */}
+      <Modal
+        open={exportProbe !== null}
+        title="导出整合包"
+        onClose={() => (exportBusy ? undefined : setExportProbe(null))}
+        width={560}
+        footer={
+          <>
+            <button className="btn" disabled={exportBusy} onClick={() => setExportProbe(null)}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={exportBusy}
+              onClick={() => void doExport()}
+            >
+              下一步（选择保存位置）
+            </button>
+          </>
+        }
+      >
+        {exportProbe !== null && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="t-cap">
+              源版本：{exportProbe.versionId}　MC {exportMc || exportProbe.gameVersion}
+              {exportProbe.loader !== '' ? ` · ${exportProbe.loader}` : ''}
+            </div>
+            <div className="t-strong" style={{ fontSize: 14 }}>导出格式</div>
+            <Select
+              width={280}
+              value={exportFormat}
+              options={[
+                { value: 'modrinth', label: 'Modrinth 整合包（.mrpack）' },
+                { value: 'curseforge', label: 'CurseForge 整合包（.zip）' },
+                { value: 'multimc', label: 'MultiMC / Prism 实例包（.zip）' }
+              ]}
+              onChange={setExportFormat}
+            />
+            <div className="t-strong" style={{ fontSize: 14 }}>包元数据</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', alignItems: 'center' }}>
+              <label className="t-cap" style={{ fontSize: 12 }}>名称</label>
+              <input className="input" value={exportName} onChange={(e) => setExportName(e.target.value)} />
+              <label className="t-cap" style={{ fontSize: 12 }}>包版本号</label>
+              <input className="input" value={exportPkgVer} onChange={(e) => setExportPkgVer(e.target.value)} />
+              <label className="t-cap" style={{ fontSize: 12 }}>作者</label>
+              <input className="input" placeholder="可留空" value={exportAuthor} onChange={(e) => setExportAuthor(e.target.value)} />
+              <label className="t-cap" style={{ fontSize: 12 }}>简介</label>
+              <input className="input" placeholder="可留空" value={exportDesc} onChange={(e) => setExportDesc(e.target.value)} />
+            </div>
+            <div className="t-strong" style={{ fontSize: 14 }}>加载器与依赖（可手改）</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', alignItems: 'center' }}>
+              <label className="t-cap" style={{ fontSize: 12 }}>Minecraft 版本</label>
+              <input className="input" value={exportMc} onChange={(e) => setExportMc(e.target.value)} />
+              <label className="t-cap" style={{ fontSize: 12 }}>加载器</label>
+              <Select
+                width={220}
+                value={exportLoaderKey}
+                options={[
+                  { value: 'none', label: '无' },
+                  { value: 'fabric-loader', label: 'Fabric' },
+                  { value: 'quilt-loader', label: 'Quilt' },
+                  { value: 'forge', label: 'Forge' },
+                  { value: 'neoforge', label: 'NeoForge' }
+                ]}
+                onChange={setExportLoaderKey}
+              />
+              <label className="t-cap" style={{ fontSize: 12 }}>加载器版本</label>
+              <input
+                className="input"
+                value={exportLoaderVer}
+                onChange={(e) => setExportLoaderVer(e.target.value)}
+                disabled={exportLoaderKey === 'none'}
+              />
+            </div>
+            <div className="t-strong" style={{ fontSize: 14 }}>打包内容</div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button className="btn btn-sm" onClick={() => applyExportPreset((n) => n === 'mods' || n === 'config')}>
+                仅 Mod 与配置
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => applyExportPreset((n) => n !== 'saves')}
+              >
+                全部内容
+              </button>
+              <button className="btn btn-sm" onClick={() => applyExportPreset(() => true)}>
+                全部（含存档）
+              </button>
+            </div>
+            <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {(exportProbe.dirs ?? []).map((d) => (
+                <label key={d.name} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={exportDirs.has(d.name)}
+                    onChange={(e) => {
+                      setExportDirs((prev) => {
+                        const next = new Set(prev)
+                        if (e.target.checked) next.add(d.name)
+                        else next.delete(d.name)
+                        return next
+                      })
+                    }}
+                  />
+                  {d.name}
+                  <span className="t-cap">
+                    {d.fileCount} 项 · {fmtSize(d.totalBytes)}
+                    {d.standard ? '' : '（自定义）'}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <label className="t-cap" style={{ fontSize: 12 }}>
+              排除规则（每行一条；含 / 匹配整条相对路径，否则匹配任意一层目录名，支持 * 与 ?）
+            </label>
+            <textarea
+              className="input"
+              style={{ height: 64, minHeight: 64, resize: 'none' }}
+              value={exportExclude}
+              onChange={(e) => setExportExclude(e.target.value)}
+            />
+            {exportBusy && progressBlock}
+          </div>
+        )}
+      </Modal>
+
+      {/* 导入预览（文件 / 链接共用） */}
+      <Modal
+        open={importPack !== null}
+        title="导入整合包"
+        onClose={() => (importBusy ? undefined : setImportPack(null))}
+        width={520}
+        footer={
+          <>
+            <button className="btn" disabled={importBusy} onClick={() => setImportPack(null)}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={importBusy}
+              onClick={() => void doImport()}
+            >
+              导入
+            </button>
+          </>
+        }
+      >
+        {importPack !== null && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="t-cap">格式：{FORMAT_LABEL[importPack.preview.format] ?? importPack.preview.format}</div>
+            <div className="t-strong" style={{ fontSize: 14 }}>包名：{importPack.preview.name}</div>
+            <div className="t-cap">
+              Minecraft {importPack.preview.gameVersion || '（未识别）'}
+              {importPack.preview.loader !== '' ? ` · ${importPack.preview.loader}` : ''} ·{' '}
+              {importPack.preview.fileCount} 个文件 · {fmtSize(importPack.preview.totalBytes)}
+            </div>
+            <div className="t-cap" style={{ fontSize: 12 }}>新建版本名称</div>
+            <input
+              className="input"
+              placeholder="新建版本名称"
+              value={importName}
+              onChange={(e) => setImportName(e.target.value)}
+            />
+            {importPack.preview.format === 'raw' && (
+              <>
+                <div className="t-cap" style={{ fontSize: 12 }}>Minecraft 版本（必填）</div>
+                <input
+                  className="input"
+                  placeholder="例如 1.20.1"
+                  value={importMc}
+                  onChange={(e) => setImportMc(e.target.value)}
+                />
+                <div className="t-cap" style={{ fontSize: 12 }}>
+                  这个压缩包没有整合包清单，请填写它对应的 Minecraft 版本；导入时会联动安装该原版。
+                </div>
+              </>
+            )}
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={importIsolated}
+                onChange={(e) => setImportIsolated(e.target.checked)}
+              />
+              版本隔离（推荐，整合包内容单独存放）
+            </label>
+            <div className="t-cap" style={{ fontSize: 12 }}>
+              {importIsolated
+                ? '整合包内容将单独存放在 versions/<新名称>/ 下。'
+                : '将写入共享 .minecraft 目录，不会新建版本条目。'}
+            </div>
+            {importBusy && progressBlock}
+          </div>
+        )}
+      </Modal>
+
+      {/* 从链接导入 */}
+      <Modal
+        open={linkOpen}
+        title="从链接导入"
+        onClose={() => (linkBusy ? undefined : setLinkOpen(false))}
+        width={520}
+        footer={
+          <>
+            <button className="btn" disabled={linkBusy} onClick={() => setLinkOpen(false)}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={linkBusy || linkUrl.trim() === ''}
+              onClick={() => void doLinkImport()}
+            >
+              下载并导入
+            </button>
+          </>
+        }
+      >
+        <div className="t-cap" style={{ marginBottom: 10 }}>
+          支持 Modrinth / CurseForge 整合包页面链接，以及 .mrpack / .zip 压缩包直链。
+        </div>
+        <input
+          className="input"
+          placeholder="https://modrinth.com/modpack/… 或 …/curseforge.com/minecraft/modpacks/…"
+          value={linkUrl}
+          onChange={(e) => setLinkUrl(e.target.value)}
+        />
+        {linkBusy && progressBlock}
+      </Modal>
+
+      {/* 备份与回档 */}
+      <Modal
+        open={backupFor !== null}
+        title={`备份与回档 · ${backupFor?.id ?? ''}`}
+        onClose={() => (backupBusy ? undefined : setBackupFor(null))}
+        width={560}
+        footer={
+          <>
+            <button
+              className="btn"
+              disabled={backupBusy}
+              onClick={() => {
+                void request('shell.openPath', { path: `${gameDir}\\starcloud\\backups` }).catch(() =>
+                  push('info', `备份目录：${gameDir}/starcloud/backups`)
+                )
+              }}
+            >
+              打开备份目录
+            </button>
+            <button className="btn" disabled={backupBusy} onClick={() => setBackupFor(null)}>
+              关闭
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={backupBusy}
+              onClick={() => void doBackup()}
+            >
+              开始备份
+            </button>
+          </>
+        }
+      >
+        {backupFor !== null && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="t-strong" style={{ fontSize: 14 }}>备份粒度</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[...backupDirs].map((name) => (
+                <span key={name} className="chip chip-accent">
+                  {name}
+                </span>
+              ))}
+              {backupSaves && <span className="chip chip-accent">saves</span>}
+            </div>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={backupSaves}
+                onChange={(e) => setBackupSaves(e.target.checked)}
+              />
+              包含存档（saves）
+            </label>
+            {backupBusy && progressBlock}
+            <div className="t-strong" style={{ fontSize: 14, marginTop: 6 }}>
+              已有备份（{backupEntries.length}）
+            </div>
+            <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {backupEntries.length === 0 && (
+                <div className="t-cap">还没有这个版本的备份。</div>
+              )}
+              {backupEntries.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="fr-dialog-row"
+                  style={{ gridTemplateColumns: 'minmax(0,1fr) auto auto' }}
+                >
+                  <span style={{ minWidth: 0 }}>
+                    <span className="t-strong truncate" style={{ display: 'block', fontSize: 13 }}>
+                      {entry.name}
+                    </span>
+                    <span className="t-cap">
+                      {new Date(entry.created_at).toLocaleString()} · {fmtSize(entry.size_bytes)} ·{' '}
+                      {entry.includes.join('、') || '—'}
+                    </span>
+                  </span>
+                  <button
+                    className="btn"
+                    style={{ height: 28, padding: '0 10px' }}
+                    disabled={backupBusy}
+                    onClick={() => void restoreBackup(entry)}
+                  >
+                    回档
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    style={{ height: 28, padding: '0 10px' }}
+                    disabled={backupBusy}
+                    onClick={() => void deleteBackup(entry)}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* 删除确认 */}

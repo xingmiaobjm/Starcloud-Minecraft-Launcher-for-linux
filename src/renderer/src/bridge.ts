@@ -330,13 +330,22 @@ export interface NativeApi {
   /** 用系统默认浏览器打开链接（设备码验证站点）。 */
   openExternal: (url: string) => Promise<void>
   /** 系统文件选择框；返回 null 表示用户取消。 */
-  pickFile: (title: string) => Promise<string | null>
+  pickFile: (
+    title: string,
+    filters?: Array<{ name: string; extensions: string[] }>
+  ) => Promise<string | null>
+  /** 系统保存对话框（整合包导出）；返回 null 表示用户取消。 */
+  pickSaveFile: (
+    title: string,
+    defaultName: string,
+    filters?: Array<{ name: string; extensions: string[] }>
+  ) => Promise<string | null>
 }
 
 /** preload 未注入时（浏览器调试）返回 null，相关功能退化为提示。 */
 export function nativeApi(): NativeApi | null {
   const api = (globalThis as { native?: NativeApi }).native
-  return api !== undefined && typeof api.skinIcon === 'function' ? api : null
+  return api !== undefined && typeof api.pickFile === 'function' ? api : null
 }
 
 const MOCK_NOW = Date.now()
@@ -643,6 +652,89 @@ function mockOf(method: string, p: Record<string, unknown>): unknown {
       }
     case 'versions.delete':
       return { deleted: true, freedBytes: 39_690_000, wasDefault: false }
+    case 'versions.rename':
+    case 'versions.copy':
+      return { ok: true, versionId: String(p.newId ?? p.newName ?? 'renamed') }
+    case 'versions.exportProbe':
+      return {
+        versionId: String(p.versionId ?? '1.20.4'),
+        gameVersion: '1.20.4',
+        dependencies: { minecraft: '1.20.4', 'fabric-loader': '0.16.9' },
+        loader: 'Fabric 0.16.9',
+        dirs: [
+          { name: 'mods', fileCount: 42, totalBytes: 128_000_000, standard: true },
+          { name: 'config', fileCount: 18, totalBytes: 240_000, standard: true },
+          { name: 'resourcepacks', fileCount: 2, totalBytes: 34_000_000, standard: true },
+          { name: 'saves', fileCount: 3, totalBytes: 96_000_000, standard: false }
+        ]
+      }
+    case 'versions.exportModpack':
+      return {
+        ok: true,
+        path: String(p.outPath ?? '/tmp/pack.mrpack'),
+        downloadableFiles: 12,
+        overriddenFiles: 48,
+        skippedFiles: 0,
+        totalBytes: 162_000_000,
+        loaderWarning: undefined
+      }
+    case 'versions.resolvePackLink':
+      return { url: 'https://example.com/pack.mrpack', fileName: 'pack.mrpack' }
+    case 'versions.downloadPack':
+      return { path: '/tmp/starcloud-pack/mock.mrpack', fileName: 'pack.mrpack' }
+    case 'versions.packPreview':
+      return {
+        format: 'modrinth',
+        name: '示例整合包',
+        gameVersion: '1.20.4',
+        dependencies: { minecraft: '1.20.4', 'fabric-loader': '0.16.9' },
+        loader: 'Fabric 0.16.9',
+        fileCount: 64,
+        totalBytes: 210_000_000,
+        contentRoot: ''
+      }
+    case 'versions.importPack':
+      return {
+        ok: true,
+        targetId: String(p.targetId ?? '示例整合包'),
+        renamed: false,
+        isolated: p.isolated !== false,
+        summary: '已联动安装 Minecraft 1.20.4 + Fabric 0.16.9',
+        gameVersion: '1.20.4'
+      }
+    case 'versions.backupList':
+    case 'versions.backupRebuild':
+      return {
+        entries: [
+          {
+            id: 'ab12cd34',
+            version_id: String(p.versionId ?? '1.20.4'),
+            name: '备份-2026-10-20_1830',
+            created_at: ago(18),
+            size_bytes: 182_000_000,
+            file_count: 126,
+            zip_path: '1.20.4/ab12cd34.zip',
+            includes: ['mods', 'config']
+          }
+        ]
+      }
+    case 'versions.backupCreate':
+      return {
+        ok: true,
+        entry: {
+          id: 'new00000',
+          version_id: String(p.versionId ?? '1.20.4'),
+          name: String(p.name ?? '备份'),
+          created_at: new Date(MOCK_NOW).toISOString(),
+          size_bytes: 128_000_000,
+          file_count: 98,
+          zip_path: 'mock/new00000.zip',
+          includes: (p.dirs as string[]) ?? []
+        }
+      }
+    case 'versions.backupRestore':
+    case 'versions.backupDelete':
+      return { ok: true }
     case 'versions.openFolder':
       return { ok: true, path: 'D:\\Games\\.minecraft\\versions' }
     case 'versions.setDefault':
