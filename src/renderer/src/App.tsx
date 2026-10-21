@@ -184,6 +184,15 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
           </ErrorBoundary>
         </main>
       </div>
+      {/* 调度中心抽屉（标题栏 ⊜ 按钮）：挂在 win-body 外，盖住内容区但不盖标题栏 */}
+      <TaskDrawer
+        open={tasksOpen}
+        tasks={taskCenter.tasks}
+        notifications={taskCenter.notifications}
+        session={session}
+        onClearNotifications={taskCenter.clearNotifications}
+        onClose={() => setTasksOpen(false)}
+      />
     </div>
   )
 }
