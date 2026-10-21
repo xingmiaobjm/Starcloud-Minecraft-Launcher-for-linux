@@ -5,12 +5,18 @@
 ///   上身（头/身/臂）随 |sin| 下沉 0.6 皮肤像素，腿钉在地上；
 /// · 拖拽转视角（yaw 0.45°/px；往下拖看到头顶）、滚轮缩放 0.7–3.0；
 /// · slim 判定同 Win：64×64 皮肤 (54,20) 处 alpha = 0 即细臂。
+///
+/// 贴图采样：每个面都先从整张皮肤上裁成独立小图再贴（而不是用
+/// background-position 从整图里"开窗"）。3D 斜面下 Chromium 的最近邻采样会在
+/// 面的边缘取到相邻 UV 区域的像素（左臂侧面左缘挨着绿色裤子，就会出现
+/// 一条绿线"像素错位"）；裁切后小图边缘只会 clamp 到自己的像素。
 import { useEffect, useRef, useState } from 'react'
 
 /** 皮肤像素 → 屏幕像素的基准倍率（高度 24+8 = 32 皮肤像素）。 */
 const S = 6
 
 type Rect = [number, number, number, number] // x, y, w, h（64 宽皮肤坐标）
+type FaceKey = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom'
 
 interface PartSpec {
   key: string
@@ -21,24 +27,22 @@ interface PartSpec {
   /** 模型坐标：中心 x、底面 y（脚底 0，头 32） */
   cx: number
   y: number
-  faces: Record<'front' | 'back' | 'left' | 'right' | 'top' | 'bottom', Rect>
+  faces: Record<FaceKey, Rect>
   /** 摆动轴心（相对部件顶部的 y 偏移，皮肤像素） */
   pivotY?: number
-  swing?: 'arm-l' | 'arm-r' | 'leg-l' | 'leg-r' | 'head'
   upper?: boolean
 }
 
-const HEAD_FACES = (legacy: boolean): PartSpec['faces'] => ({
+const HEAD_FACES: Record<FaceKey, Rect> = {
   front: [8, 8, 8, 8],
   back: [24, 8, 8, 8],
   right: [0, 8, 8, 8],
   left: [16, 8, 8, 8],
   top: [8, 0, 8, 8],
-  bottom: [16, 0, 8, 8],
-  // legacy 参数仅为签名一致（头没有新旧版差异）
-})
+  bottom: [16, 0, 8, 8]
+}
 
-const BODY_FACES: PartSpec['faces'] = {
+const BODY_FACES: Record<FaceKey, Rect> = {
   front: [20, 20, 8, 12],
   back: [32, 20, 8, 12],
   right: [16, 20, 4, 12],
@@ -47,7 +51,7 @@ const BODY_FACES: PartSpec['faces'] = {
   bottom: [28, 16, 8, 4]
 }
 
-const ARM_R_FACES: PartSpec['faces'] = {
+const ARM_R_FACES: Record<FaceKey, Rect> = {
   front: [44, 20, 4, 12],
   back: [52, 20, 4, 12],
   right: [40, 20, 4, 12],
@@ -56,7 +60,7 @@ const ARM_R_FACES: PartSpec['faces'] = {
   bottom: [48, 16, 4, 4]
 }
 
-const ARM_L_FACES: PartSpec['faces'] = {
+const ARM_L_FACES: Record<FaceKey, Rect> = {
   front: [36, 52, 4, 12],
   back: [44, 52, 4, 12],
   right: [32, 52, 4, 12],
@@ -65,8 +69,8 @@ const ARM_L_FACES: PartSpec['faces'] = {
   bottom: [40, 48, 4, 4]
 }
 
-/** slim：臂宽 3，左右臂贴图各自按新版式取（右臂 44/40/47/51，左臂 35/31/39/43）。 */
-const SLIM_ARM_R: PartSpec['faces'] = {
+/** slim：臂宽 3，左右臂贴图各自按新版式取。 */
+const SLIM_ARM_R: Record<FaceKey, Rect> = {
   front: [44, 20, 3, 12],
   back: [51, 20, 3, 12],
   right: [40, 20, 4, 12],
@@ -74,16 +78,16 @@ const SLIM_ARM_R: PartSpec['faces'] = {
   top: [44, 16, 3, 4],
   bottom: [47, 16, 3, 4]
 }
-const SLIM_ARM_L: PartSpec['faces'] = {
-  front: [35, 52, 3, 12],
-  back: [42, 52, 3, 12],
-  right: [31, 52, 4, 12],
+const SLIM_ARM_L: Record<FaceKey, Rect> = {
+  front: [36, 52, 3, 12],
+  back: [43, 52, 3, 12],
+  right: [32, 52, 4, 12],
   left: [39, 52, 4, 12],
-  top: [35, 48, 3, 4],
+  top: [36, 48, 3, 4],
   bottom: [39, 48, 3, 4]
 }
 
-const LEG_R_FACES: PartSpec['faces'] = {
+const LEG_R_FACES: Record<FaceKey, Rect> = {
   front: [4, 20, 4, 12],
   back: [12, 20, 4, 12],
   right: [0, 20, 4, 12],
@@ -91,7 +95,7 @@ const LEG_R_FACES: PartSpec['faces'] = {
   top: [4, 16, 4, 4],
   bottom: [8, 16, 4, 4]
 }
-const LEG_L_FACES: PartSpec['faces'] = {
+const LEG_L_FACES: Record<FaceKey, Rect> = {
   front: [20, 52, 4, 12],
   back: [28, 52, 4, 12],
   right: [16, 52, 4, 12],
@@ -108,17 +112,7 @@ function buildParts(slim: boolean, legacy: boolean): PartSpec[] {
   const legL = legacy ? LEG_R_FACES : LEG_L_FACES
   const armR = slim && !legacy ? SLIM_ARM_R : ARM_R_FACES
   return [
-    {
-      key: 'head',
-      w: 8,
-      h: 8,
-      d: 8,
-      cx: 0,
-      y: 24,
-      faces: HEAD_FACES(legacy),
-      swing: 'head',
-      upper: true
-    },
+    { key: 'head', w: 8, h: 8, d: 8, cx: 0, y: 24, faces: HEAD_FACES, upper: true },
     { key: 'body', w: 8, h: 12, d: 4, cx: 0, y: 12, faces: BODY_FACES, upper: true },
     {
       key: 'arm-r',
@@ -129,7 +123,6 @@ function buildParts(slim: boolean, legacy: boolean): PartSpec[] {
       y: 12,
       faces: armR,
       pivotY: 2,
-      swing: 'arm-r',
       upper: true
     },
     {
@@ -141,11 +134,10 @@ function buildParts(slim: boolean, legacy: boolean): PartSpec[] {
       y: 12,
       faces: armL,
       pivotY: 2,
-      swing: 'arm-l',
       upper: true
     },
-    { key: 'leg-r', w: 4, h: 12, d: 4, cx: -2, y: 0, faces: LEG_R_FACES, pivotY: 0, swing: 'leg-r' },
-    { key: 'leg-l', w: 4, h: 12, d: 4, cx: 2, y: 0, faces: legL, pivotY: 0, swing: 'leg-l' }
+    { key: 'leg-r', w: 4, h: 12, d: 4, cx: -2, y: 0, faces: LEG_R_FACES, pivotY: 0 },
+    { key: 'leg-l', w: 4, h: 12, d: 4, cx: 2, y: 0, faces: legL, pivotY: 0 }
   ]
 }
 
@@ -180,28 +172,52 @@ function detectSlim(texture: string): Promise<boolean> {
   })
 }
 
-function faceStyle(
-  texture: string,
-  rect: Rect,
-  size: { w: number; h: number },
-  transform: string
-): React.CSSProperties {
-  const [x, y] = rect
-  return {
-    position: 'absolute',
-    width: `${size.w}px`,
-    height: `${size.h}px`,
-    backgroundImage: `url("${texture}")`,
-    backgroundSize: `${64 * S}px ${64 * S}px`,
-    backgroundPosition: `${-x * S}px ${-y * S}px`,
-    imageRendering: 'pixelated',
-    transform,
-    backfaceVisibility: 'hidden'
-  }
+/**
+ * 把每个面从整张皮肤裁成独立小图（1 皮肤像素 = 1 图元，CSS 再放大）。
+ * 3D 斜面下 background-position 开窗会在面边缘采到邻居区域，裁切能杜绝。
+ */
+function cropFaces(texture: string, parts: PartSpec[]): Promise<Record<string, string>> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const unit = img.width / 64
+        const out: Record<string, string> = {}
+        for (const part of parts) {
+          for (const face of Object.keys(part.faces) as FaceKey[]) {
+            const [x, y, w, h] = part.faces[face]
+            const c = document.createElement('canvas')
+            c.width = w
+            c.height = h
+            const ctx = c.getContext('2d')
+            if (ctx === null) continue
+            ctx.imageSmoothingEnabled = false
+            ctx.drawImage(
+              img,
+              Math.round(x * unit),
+              Math.round(y * unit),
+              Math.round(w * unit),
+              Math.round(h * unit),
+              0,
+              0,
+              w,
+              h
+            )
+            out[`${part.key}:${face}`] = c.toDataURL('image/png')
+          }
+        }
+        resolve(out)
+      } catch {
+        resolve({})
+      }
+    }
+    img.onerror = () => resolve({})
+    img.src = texture
+  })
 }
 
 export default function SkinFigure(props: {
-  /** 原始皮肤纹理（data URL）。空 = 只画一个淡色占位方块。 */
+  /** 原始皮肤纹理（data URL）。空 = 只画淡色占位方块。 */
   texture?: string
   /** 走路动画开关（设置 → 账号走路动画）。 */
   walking?: boolean
@@ -211,18 +227,20 @@ export default function SkinFigure(props: {
   const height = props.height ?? 300
   const [slim, setSlim] = useState(false)
   const [legacy, setLegacy] = useState(false)
+  const [faceUrls, setFaceUrls] = useState<Record<string, string>>({})
   const stageRef = useRef<HTMLDivElement | null>(null)
   const upperRef = useRef<HTMLDivElement | null>(null)
   const partsRef = useRef<Record<string, HTMLDivElement | null>>({})
   const drag = useRef<{ active: boolean; x: number; y: number }>({ active: false, x: 0, y: 0 })
   const view = useRef({ yaw: -22, pitch: 6, zoom: 1 })
 
-  // 纹理变化：识别 slim / 旧版式
+  // 纹理变化：识别 slim / 旧版式 + 裁好每面的小图
   useEffect(() => {
     const texture = props.texture
     if (texture === undefined || texture === '') {
       setSlim(false)
       setLegacy(false)
+      setFaceUrls({})
       return
     }
     let alive = true
@@ -240,6 +258,19 @@ export default function SkinFigure(props: {
       alive = false
     }
   }, [props.texture])
+
+  // slim / legacy 确定后按最终部件表裁图
+  useEffect(() => {
+    const texture = props.texture
+    if (texture === undefined || texture === '') return
+    let alive = true
+    void cropFaces(texture, buildParts(slim, legacy)).then((urls) => {
+      if (alive) setFaceUrls(urls)
+    })
+    return () => {
+      alive = false
+    }
+  }, [props.texture, slim, legacy])
 
   // 相机姿态应用
   const applyView = (): void => {
@@ -333,7 +364,7 @@ export default function SkinFigure(props: {
           width: `${24 * S}px`,
           height: `${modelH}px`,
           transformStyle: 'preserve-3d',
-          transform: `scale(1) rotateX(-6deg) rotateY(-22deg)`,
+          transform: 'scale(1) rotateX(-6deg) rotateY(-22deg)',
           position: 'relative'
         }}
       >
@@ -348,7 +379,7 @@ export default function SkinFigure(props: {
               <SkinPart
                 key={part.key}
                 part={part}
-                texture={props.texture}
+                urls={faceUrls}
                 modelH={modelH}
                 register={(node) => {
                   partsRef.current[part.key] = node
@@ -362,7 +393,7 @@ export default function SkinFigure(props: {
             <SkinPart
               key={part.key}
               part={part}
-              texture={props.texture}
+              urls={faceUrls}
               modelH={modelH}
               register={(node) => {
                 partsRef.current[part.key] = node
@@ -376,7 +407,7 @@ export default function SkinFigure(props: {
 
 function SkinPart(props: {
   part: PartSpec
-  texture?: string
+  urls: Record<string, string>
   modelH: number
   register: (node: HTMLDivElement | null) => void
 }): JSX.Element {
@@ -386,26 +417,29 @@ function SkinPart(props: {
   const d = part.d * S
   const left = (12 + part.cx - part.w / 2) * S
   const top = modelH - (part.y + part.h) * S
-  const texture = props.texture ?? ''
-  const hasTexture = texture !== ''
   const tint = 'rgba(160,160,160,0.35)'
 
-  const face = (
-    rect: Rect,
-    fw: number,
-    fh: number,
-    transform: string
-  ): React.CSSProperties => {
-    if (!hasTexture) {
-      return {
-        position: 'absolute',
-        width: `${fw}px`,
-        height: `${fh}px`,
-        background: tint,
-        transform
-      }
+  const face = (fw: number, fh: number, transform: string, faceKey: FaceKey): React.CSSProperties => {
+    const url = props.urls[`${part.key}:${faceKey}`]
+    return {
+      position: 'absolute',
+      // 面必须与方块同心：旋转/平移都以面中心为原点，否则侧面和顶面会整体偏出半个方块
+      left: '50%',
+      top: '50%',
+      marginLeft: -fw / 2,
+      marginTop: -fh / 2,
+      width: `${fw}px`,
+      height: `${fh}px`,
+      ...(url !== undefined
+        ? {
+            backgroundImage: `url("${url}")`,
+            backgroundSize: '100% 100%',
+            imageRendering: 'pixelated' as const
+          }
+        : { background: tint }),
+      transform,
+      backfaceVisibility: 'hidden'
     }
-    return faceStyle(texture, rect, { w: fw, h: fh }, transform)
   }
 
   return (
@@ -421,12 +455,12 @@ function SkinPart(props: {
         transformOrigin: `50% ${(part.pivotY ?? 0) * S}px`
       }}
     >
-      <div style={face(part.faces.front, w, h, `translateZ(${d / 2}px)`)} />
-      <div style={face(part.faces.back, w, h, `rotateY(180deg) translateZ(${d / 2}px)`)} />
-      <div style={face(part.faces.right, d, h, `rotateY(90deg) translateZ(${w / 2}px)`)} />
-      <div style={face(part.faces.left, d, h, `rotateY(-90deg) translateZ(${w / 2}px)`)} />
-      <div style={face(part.faces.top, w, d, `rotateX(90deg) translateZ(${h / 2}px)`)} />
-      <div style={face(part.faces.bottom, w, d, `rotateX(-90deg) translateZ(${h / 2}px)`)} />
+      <div style={face(w, h, `translateZ(${d / 2}px)`, 'front')} />
+      <div style={face(w, h, `rotateY(180deg) translateZ(${d / 2}px)`, 'back')} />
+      <div style={face(d, h, `rotateY(90deg) translateZ(${w / 2}px)`, 'right')} />
+      <div style={face(d, h, `rotateY(-90deg) translateZ(${w / 2}px)`, 'left')} />
+      <div style={face(w, d, `rotateX(90deg) translateZ(${h / 2}px)`, 'top')} />
+      <div style={face(w, d, `rotateX(-90deg) translateZ(${h / 2}px)`, 'bottom')} />
     </div>
   )
 }
