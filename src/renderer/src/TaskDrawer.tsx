@@ -110,10 +110,18 @@ export default function TaskDrawer(props: {
             padding: '18px 20px 10px'
           }}
         >
-          <span style={{ color: 'var(--accent)', marginTop: 3 }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden>
-              <path d="M4 6.5h16M4 12h16M4 17.5h16" />
-            </svg>
+          {/* Win 端同字形：U+EC89，accent 色 15px（MainWindow 抽屉标题行） */}
+          <span
+            style={{
+              color: 'var(--accent)',
+              fontFamily: 'var(--font-icon)',
+              fontSize: 15,
+              lineHeight: 1,
+              marginTop: 4
+            }}
+            aria-hidden
+          >
+            {String.fromCharCode(0xec89)}
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 600 }}>调度中心</div>
@@ -129,7 +137,19 @@ export default function TaskDrawer(props: {
             aria-label="关闭调度中心"
             onClick={props.onClose}
           >
-            ⊗
+            {/* Win 端同字形：U+EA86（ChromeClose 的小号鴻蒙变体） */}
+            <span
+              style={{
+                fontFamily: 'var(--font-icon)',
+                fontSize: 13,
+                lineHeight: 1,
+                color: 'var(--text-secondary)',
+                display: 'inline-flex'
+              }}
+              aria-hidden
+            >
+              {String.fromCharCode(0xea86)}
+            </span>
           </button>
         </div>
 

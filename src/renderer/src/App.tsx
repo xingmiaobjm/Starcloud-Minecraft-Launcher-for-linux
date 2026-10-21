@@ -13,7 +13,7 @@ import { ErrorBoundary } from './ui'
 import { useGameSession } from './state/session'
 import { useTaskCenter } from './state/tasks'
 import TaskDrawer from './TaskDrawer'
-import { IconUser, IconTasks } from './icons'
+import { IconUser } from './icons'
 import HomePage from './pages/Home'
 import VersionsPage from './pages/Versions'
 import DownloadPage from './pages/Download'
@@ -149,7 +149,10 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
               aria-label="调度中心"
               onClick={() => setTasksOpen(true)}
             >
-              <IconTasks size={16} />
+              {/* Win 端同字形：ic_message_allread U+EC89（鸿蒙图标库） */}
+              <span style={{ fontFamily: 'var(--font-icon)', fontSize: 15, lineHeight: 1 }}>
+                {String.fromCharCode(0xec89)}
+              </span>
             </button>
             <button
               className="tb-action-btn"
