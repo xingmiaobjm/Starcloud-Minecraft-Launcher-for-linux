@@ -1102,5 +1102,11 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
 .t-meta { font-size: 11px; color: var(--text-tertiary); }
 .t-mono { font-family: var(--font-mono); }
 
+/* 输入类控件用下划线表达焦点，鼠标聚焦时不再叠外描边 */
+.input:focus:not(:focus-visible),
+select.input:focus:not(:focus-visible) {
+  outline: none;
+}
+
 /* ═══ 焦点可见 ═══ */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
