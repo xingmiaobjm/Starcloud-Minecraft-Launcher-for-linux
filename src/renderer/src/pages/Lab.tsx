@@ -5,9 +5,10 @@
 /// 按 (x+y+z) 深度排序后由远及近绘制，后画的自然盖住先画的，颜色由 block id 哈希成 HSL。
 /// 视图变换（缩放/平移）存在 useRef 里，滚轮与拖拽只改 ref 并触发重绘，不进 React 状态。
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { request } from '../bridge'
+import { request, nativeApi } from '../bridge'
 import type { ProjectionPreview } from '../bridge'
 import ProjectionViewer from '../projectionViewer'
+import { ColorTextTool, CommandTool, CommunityTool } from './labTools'
 import { EmptyState, PageShell, SkeletonList, useToasts } from '../ui'
 import { IconList, IconSettings, IconWorld, IconImport, IconClose, IconWarning, IconRefresh } from '../icons'
 
@@ -93,8 +94,8 @@ export default function LabPage() {
     void scanProjections()
   }, [scanProjections])
 
-  const load = async () => {
-    const target = path.trim()
+  const load = async (targetArg?: string) => {
+    const target = (targetArg ?? path).trim()
     if (target.length === 0) {
       push('info', '先填写投影文件的绝对路径。')
       return
@@ -273,7 +274,6 @@ export default function LabPage() {
                 style={{ height: 40, width: '100%' }}
                 onClick={() => {
                   setSection(t.id)
-                  if (t.id !== 'workshop') push('info', `${t.label}：实验室功能开发中`)
                 }}
               >
                 <span className="nav-icon" style={{ fontFamily: 'inherit', fontSize: 14 }}>
@@ -284,7 +284,13 @@ export default function LabPage() {
             ))}
           </div>
 
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
+          {section !== 'workshop' && (
+            <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              {section === 'color' ? <ColorTextTool /> : section === 'community' ? <CommunityTool /> : <CommandTool />}
+            </div>
+          )}
+
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', display: section === 'workshop' ? 'block' : 'none' }}>
             {/* 投影工坊：路径 + 三个操作 + 文件列表 */}
             <div className="card" style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -302,13 +308,32 @@ export default function LabPage() {
                 </button>
                 <button
                   className="btn"
-                  onClick={() => push('info', '打开文件：需要主进程文件对话框，接入后可用')}
+                  onClick={() => {
+                    void (async () => {
+                      const api = nativeApi()
+                      if (api === null) {
+                        push('info', '当前环境没有文件选择框；把投影放进 schematics 目录后点「刷新列表」')
+                        return
+                      }
+                      const picked = await api.pickFile('选择投影文件', [
+                        { name: '投影文件', extensions: ['litematic', 'schematic', 'nbt'] }
+                      ])
+                      if (picked !== null) {
+                        setPath(picked)
+                        await load(picked)
+                      }
+                    })()
+                  }}
                 >
                   打开文件…
                 </button>
                 <button
                   className="btn"
-                  onClick={() => push('info', '打开投影目录：需要主进程 openPath，接入后可用')}
+                  onClick={() => {
+                    void request('shell.openPath', { path: schematicsDir }).catch((e) =>
+                      push('error', `打开投影目录失败：${String(e)}`)
+                    )
+                  }}
                 >
                   打开投影目录
                 </button>

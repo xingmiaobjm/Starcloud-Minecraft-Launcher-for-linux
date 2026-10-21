@@ -5,7 +5,7 @@
 /// 「启动器日志」先显示本会话的桥接/启动记录；「游戏日志」订阅 game.output。
 import { useEffect, useRef, useState } from 'react'
 
-import { onBridgeEvent } from '../bridge'
+import { onBridgeEvent, request } from '../bridge'
 import { useToasts } from '../ui'
 import { IconClose } from '../icons'
 
@@ -109,7 +109,16 @@ export default function LogsPage(props: {
         ))}
         <button
           className="btn"
-          onClick={() => push('info', '打开日志目录：主进程 openPath 接入后可用')}
+          onClick={() => {
+            void (async () => {
+              try {
+                const paths = await request<{ logDir: string }>('app.paths')
+                await request('shell.openPath', { path: paths.logDir })
+              } catch (e) {
+                push('error', `打开日志目录失败：${String(e)}`)
+              }
+            })()
+          }}
         >
           打开日志目录
         </button>
@@ -139,7 +148,8 @@ export default function LogsPage(props: {
             lines.map((l) => (
               <div key={l.id} style={{ display: 'flex', gap: 8 }}>
                 <span style={{ opacity: 0.55, flexShrink: 0 }}>[{l.at}]</span>
-                <span style={{ opacity: 0.7, flexShrink: 0, width: 54 }}>[{l.channel}]</span>
+                {/* 频道名不能给固定宽度：`[multiplayer]` 比 54px 宽，溢出的文字会压到正文上 */}
+                <span style={{ opacity: 0.7, flexShrink: 0 }}>[{l.channel}]</span>
                 <span style={{ minWidth: 0, wordBreak: 'break-word' }}>{l.text}</span>
               </div>
             ))
