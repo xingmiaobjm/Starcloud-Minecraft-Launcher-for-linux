@@ -75,7 +75,60 @@ function isHttpUrl(raw: string): boolean {
   return /^https?:\/\/\S+$/i.test(raw.trim())
 }
 
-export default function SkinsPage(): JSX.Element {
+/**
+ * 皮肤纹理 → 正面小人立绘（Win 端 SkinThumbnails 的等价物，2D 拼装版）。
+ * 64×64：头(8,8) 帽(40,8) 身(20,20) 右臂(44,20) 左臂(36,52) 右腿(4,20) 左腿(20,52)；
+ * 64×32（旧版式）：四肢左右共用右臂/右腿的贴图。
+ * 画不出来（跨域图片环境异常等）时返回 null，调用方回落原始纹理。
+ */
+function renderFigure(dataUrl: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const w = img.width
+        const old = w <= 64 * 1.01 && img.height <= 32 * 1.01 // 64×32 及其放大
+        const unit = w / 64 // 等比放大的皮肤都归一到 64 宽
+        const px = (n: number): number => Math.round(n * unit)
+        const canvas = document.createElement('canvas')
+        const scale = 4
+        canvas.width = 24 * px(1) * scale
+        canvas.height = 32 * px(1) * scale
+        const ctx = canvas.getContext('2d')
+        if (ctx === null) {
+          resolve(null)
+          return
+        }
+        ctx.imageSmoothingEnabled = false
+        const put = (sx: number, sy: number, sw: number, sh: number, dx: number, dy: number): void => {
+          ctx.drawImage(img, px(sx), px(sy), px(sw), px(sh), dx * px(1) * scale, dy * px(1) * scale, sw * px(1) * scale, sh * px(1) * scale)
+        }
+        // 布局：头 8×8 居中（x=8），身 8×12（x=8,y=8），臂 4×12（x=0 / x=16），腿 4×12（x=4 / x=12）
+        put(8, 8, 8, 8, 8, 0) // 头正面
+        put(40, 8, 8, 8, 8, 0) // 帽层
+        put(20, 20, 8, 12, 8, 8) // 身体正面
+        put(44, 20, 4, 12, 4, 8) // 右臂
+        if (!old) put(36, 52, 4, 12, 16, 8) // 左臂
+        else put(44, 20, 4, 12, 16, 8)
+        put(4, 20, 4, 12, 8, 20) // 右腿
+        if (!old) put(20, 52, 4, 12, 12, 20) // 左腿
+        else put(4, 20, 4, 12, 12, 20)
+        resolve(canvas.toDataURL('image/png'))
+      } catch {
+        resolve(null)
+      }
+    }
+    img.onerror = () => resolve(null)
+    img.src = dataUrl
+  })
+}
+
+export default function SkinsPage(props: {
+  /** 焦点账户（账户详情页嵌入时传）：绑定列表里把它排在最前。 */
+  accountUuid?: string
+  /** 嵌入模式：不渲染页面大标题（账户详情页里只留工具按钮）。 */
+  embedded?: boolean
+}): JSX.Element {
   const { push, host } = useToasts()
   const [skins, setSkins] = useState<SkinEntry[]>([])
   const [accounts, setAccounts] = useState<GameAccount[]>([])
@@ -115,7 +168,11 @@ export default function SkinsPage(): JSX.Element {
         if (api === null) continue
         void api
           .skinIcon(s.path)
-          .then((dataUrl) => setIcons((prev) => ({ ...prev, [s.id]: dataUrl })))
+          .then(async (dataUrl) => {
+            // 原始纹理 → 正面小人立绘（失败回落原始 PNG）
+            const figure = await renderFigure(dataUrl)
+            setIcons((prev) => ({ ...prev, [s.id]: figure ?? dataUrl }))
+          })
           .catch(() => setIconFailed((prev) => new Set(prev).add(s.id)))
       }
     } catch (e) {
@@ -148,7 +205,13 @@ export default function SkinsPage(): JSX.Element {
     return map
   }, [accounts])
 
-  const bindableAccounts = useMemo(() => accounts.filter(supportsLocalSkins), [accounts])
+  const bindableAccounts = useMemo(() => {
+    const list = accounts.filter(supportsLocalSkins)
+    // 焦点账户（从账户详情进来时）排最前，一眼看到「应用到它」
+    const focus = props.accountUuid
+    if (focus === undefined) return list
+    return [...list].sort((a, b) => (a.uuid === focus ? -1 : b.uuid === focus ? 1 : 0))
+  }, [accounts, props.accountUuid])
 
   async function importPath(): Promise<void> {
     const path = importPathDraft.trim()
@@ -282,30 +345,53 @@ export default function SkinsPage(): JSX.Element {
 
   return (
     <div className="page">
-      <div className="page-head">
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 className="page-title">皮肤库</h1>
-          <div className="page-sub">
-            所有账户共用一份衣柜，每个账户只记自己选了哪张；本机注入，下次启动游戏生效
+      {!props.embedded && (
+        <div className="page-head">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1 className="page-title">皮肤库</h1>
+            <div className="page-sub">
+              所有账户共用一份衣柜，每个账户只记自己选了哪张；本机注入，下次启动游戏生效
+            </div>
           </div>
+          <button
+            className="btn"
+            onClick={() => {
+              setImportPathDraft('')
+              setImportOpen(true)
+            }}
+            disabled={busy}
+          >
+            导入本地文件…
+          </button>
+          <button className="btn" onClick={() => setUrlOpen(true)} disabled={busy}>
+            从链接导入…
+          </button>
+          <button className="btn btn-primary" onClick={() => void load()} disabled={loading}>
+            <IconRefresh size={15} /> 刷新
+          </button>
         </div>
-        <button
-          className="btn"
-          onClick={() => {
-            setImportPathDraft('')
-            setImportOpen(true)
-          }}
-          disabled={busy}
-        >
-          导入本地文件…
-        </button>
-        <button className="btn" onClick={() => setUrlOpen(true)} disabled={busy}>
-          从链接导入…
-        </button>
-        <button className="btn btn-primary" onClick={() => void load()} disabled={loading}>
-          <IconRefresh size={15} /> 刷新
-        </button>
-      </div>
+      )}
+      {props.embedded && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexShrink: 0 }}>
+          <button
+            className="btn"
+            onClick={() => {
+              setImportPathDraft('')
+              setImportOpen(true)
+            }}
+            disabled={busy}
+          >
+            导入本地文件…
+          </button>
+          <button className="btn" onClick={() => setUrlOpen(true)} disabled={busy}>
+            从链接导入…
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="btn" onClick={() => void load()} disabled={loading}>
+            <IconRefresh size={15} /> 刷新
+          </button>
+        </div>
+      )}
 
       <div className="page-body">
         <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
@@ -350,7 +436,7 @@ export default function SkinsPage(): JSX.Element {
                           alt=""
                           width={48}
                           height={48}
-                          style={{ objectFit: 'cover' }}
+                          style={{ objectFit: 'contain' }}
                         />
                       ) : failed ? (
                         <IconUser size={18} style={{ opacity: 0.5 }} />
@@ -419,7 +505,7 @@ export default function SkinsPage(): JSX.Element {
                           alt=""
                           width={64}
                           height={64}
-                          style={{ objectFit: 'cover' }}
+                          style={{ objectFit: 'contain' }}
                         />
                       ) : (
                         <IconUser size={22} style={{ opacity: 0.45 }} />

@@ -20,6 +20,7 @@ import type {
 import type { ScSession } from '../bridge-friends'
 import { EmptyState, Modal, Segmented, SkeletonList, useToasts } from '../ui'
 import { IconClose, IconChevronRight } from '../icons'
+import SkinsPage from './Skins'
 
 /** 账户头像（与 Win 端 AvatarHelper 同规则：微软用 UUID，其它用用户名）。 */
 function avatarUrl(a: GameAccount): string {
@@ -337,6 +338,115 @@ export default function AccountsPage(): JSX.Element {
 
   // 同步给设备码轮询用的 ref（渲染期纯赋值，无副作用）
   syncRefs()
+
+  // ── 账户详情整页（Win 端 AccountDetailPage：资料 + 形象与皮肤） ──
+  if (detailFor !== null) {
+    const a = detailFor
+    return (
+      <div className="page">
+        <div className="page-head">
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', gap: 14, alignItems: 'center' }}>
+            <div
+              className="icon32"
+              style={{ width: 56, height: 56, borderRadius: 8, overflow: 'hidden' }}
+            >
+              {failedAvatars.has(a.uuid) ? (
+                <span style={{ fontSize: 22 }}>{a.name[0]?.toUpperCase()}</span>
+              ) : (
+                <img
+                  src={avatarUrl(a)}
+                  alt=""
+                  width={56}
+                  height={56}
+                  style={{ objectFit: 'cover' }}
+                  onError={() => setFailedAvatars((prev) => new Set(prev).add(a.uuid))}
+                />
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span className="truncate">{a.name}</span>
+                {a.uuid === current && <span className="chip chip-accent">首选</span>}
+              </h1>
+              <div className="page-sub">
+                {TYPE_LABEL[a.type] ?? a.type}
+                {a.serverName !== undefined && a.serverName !== '' ? ` · ${a.serverName}` : ''}
+                {a.skinId !== undefined && a.skinId !== '' ? ` · 皮肤 ${a.skinId}` : ''}
+              </div>
+            </div>
+          </div>
+          <button className="btn" onClick={() => setDetailFor(null)}>
+            ← 返回账户列表
+          </button>
+        </div>
+
+        <div className="page-body">
+          <div className="card" style={{ padding: '14px 18px', marginBottom: 14 }}>
+            <div className="t-cap" style={{ marginBottom: 8 }}>
+              UUID：<span className="t-mono">{a.uuid}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {a.uuid !== current && (
+                <button className="btn btn-primary" style={{ fontWeight: 600 }} onClick={() => void setAsCurrent(a)}>
+                  设为首选
+                </button>
+              )}
+              {(a.type === 'microsoft' || a.type === 'external') && (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setDetailFor(null)
+                    setAddKind(a.type === 'microsoft' ? 'microsoft' : 'external')
+                    setAddOpen(true)
+                  }}
+                >
+                  重新登录该账号
+                </button>
+              )}
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  setDetailFor(null)
+                  setPendingRemove(a)
+                }}
+              >
+                删除账户
+              </button>
+              <span className="t-cap" style={{ alignSelf: 'center' }}>
+                删除只移除本机保存的身份信息，不动游戏存档与版本文件。
+              </span>
+            </div>
+          </div>
+
+          {/* 形象与皮肤（Win 端皮肤选择器：衣柜共用，绑定到这个账户） */}
+          <div
+            style={{
+              display: 'flex',
+              gap: 8,
+              alignItems: 'center',
+              marginBottom: 12
+            }}
+          >
+            <span
+              style={{
+                width: 4,
+                height: 18,
+                borderRadius: 2,
+                background: 'var(--accent)',
+                flexShrink: 0
+              }}
+            />
+            <span className="t-strong" style={{ fontSize: 16 }}>
+              形象与皮肤
+            </span>
+            <span className="t-cap">在下面选中一张皮肤后，对「{a.name}」点「应用」</span>
+          </div>
+          <SkinsPage accountUuid={a.uuid} embedded />
+        </div>
+        {host}
+      </div>
+    )
+  }
 
   return (
     <div className="page">
@@ -786,115 +896,7 @@ export default function AccountsPage(): JSX.Element {
         </div>
       </Modal>
 
-      {/* 账户详情（Win 端 AccountDetailPage 的模态等价）：点行打开，操作都在这里 */}
-      <Modal
-        open={detailFor !== null}
-        title={detailFor?.name ?? ''}
-        width={480}
-        onClose={() => setDetailFor(null)}
-        footer={
-          <>
-            <button className="btn" onClick={() => setDetailFor(null)}>
-              返回账户列表
-            </button>
-            {detailFor !== null && detailFor.uuid !== current && (
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  const a = detailFor
-                  setDetailFor(null)
-                  if (a !== null) void setAsCurrent(a)
-                }}
-              >
-                设为首选
-              </button>
-            )}
-          </>
-        }
-      >
-        {detailFor !== null && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-              <div
-                className="icon32"
-                style={{ width: 72, height: 72, borderRadius: 8, overflow: 'hidden' }}
-              >
-                {failedAvatars.has(detailFor.uuid) ? (
-                  <span style={{ fontSize: 28 }}>{detailFor.name[0]?.toUpperCase()}</span>
-                ) : (
-                  <img
-                    src={avatarUrl(detailFor)}
-                    alt=""
-                    width={72}
-                    height={72}
-                    style={{ objectFit: 'cover' }}
-                    onError={() =>
-                      setFailedAvatars((prev) => new Set(prev).add(detailFor.uuid))
-                    }
-                  />
-                )}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 17, fontWeight: 600 }} className="truncate">
-                    {detailFor.name}
-                  </span>
-                  {detailFor.uuid === current && <span className="chip chip-accent">首选</span>}
-                </div>
-                <div className="t-cap">
-                  {TYPE_LABEL[detailFor.type] ?? detailFor.type}
-                  {detailFor.serverName !== undefined && detailFor.serverName !== ''
-                    ? ` · ${detailFor.serverName}`
-                    : ''}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div className="t-cap">
-                UUID：<span className="t-mono">{detailFor.uuid}</span>
-              </div>
-              {detailFor.skinId !== undefined && detailFor.skinId !== '' && (
-                <div className="t-cap">
-                  皮肤：<span className="t-mono">{detailFor.skinId}</span>
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {(detailFor.type === 'microsoft' || detailFor.type === 'external') && (
-                <button
-                  className="btn"
-                  onClick={() => {
-                    setDetailFor(null)
-                    setAddKind(detailFor.type === 'microsoft' ? 'microsoft' : 'external')
-                    setAddOpen(true)
-                  }}
-                >
-                  重新登录该账号
-                </button>
-              )}
-              <button className="btn" onClick={() => setDetailFor(null)}>
-                前往换肤
-              </button>
-              <button
-                className="btn btn-danger"
-                onClick={() => {
-                  const a = detailFor
-                  setDetailFor(null)
-                  if (a !== null) setPendingRemove(a)
-                }}
-              >
-                删除账户
-              </button>
-            </div>
-
-            <div className="t-cap">
-              删除只移除本机保存的身份信息，不动游戏存档与版本文件。
-            </div>
-          </div>
-        )}
-      </Modal>
+      {/* 账户详情改为整页（见上方 detailFor 分支）：资料 + 形象与皮肤 */}
 
       {host}
     </div>
