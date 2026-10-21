@@ -250,6 +250,8 @@ export interface NovaConfig {
   baseUrl: string
   apiKey: string
   model: string
+  /** Starcloud 云端中转开关（NovaGatewayEnabled） */
+  gatewayEnabled?: boolean
 }
 
 export interface SettingsSnapshot {

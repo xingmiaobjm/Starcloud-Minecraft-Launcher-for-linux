@@ -123,7 +123,7 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
       case 'plugins':
         return <PluginsPage />
       case 'nova':
-        return <NovaPage seed={novaSeed} />
+        return <NovaPage seed={novaSeed} onGoLogin={() => setPage('accounts')} />
       case 'logs':
         return <LogsPage session={session} />
       case 'settings':

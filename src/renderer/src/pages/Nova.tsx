@@ -47,11 +47,13 @@ interface ChatMessage {
   plan?: NovaPlanItem[]
 }
 
-export default function NovaPage(props: { seed?: string }): JSX.Element {
+export default function NovaPage(props: { seed?: string; onGoLogin?: () => void }): JSX.Element {
   const { push, host } = useToasts()
   const [config, setConfig] = useState<NovaConfig>({ baseUrl: '', apiKey: '', model: '' })
   const [draft, setDraft] = useState<NovaConfig>({ baseUrl: '', apiKey: '', model: '' })
   const [useCloud, setUseCloud] = useState(false)
+  const [session, setSession] = useState<{ loggedIn: boolean; displayName?: string; userId?: string } | null>(null)
+  const signedIn = session?.loggedIn === true
   const [overlay, setOverlay] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [plan, setPlan] = useState<PlanState | null>(null)
@@ -75,6 +77,7 @@ export default function NovaPage(props: { seed?: string }): JSX.Element {
       const value = await request<NovaConfig>('nova.config.get')
       setConfig(value)
       setDraft(value)
+      setUseCloud(value.gatewayEnabled !== false)
     } catch (e) {
       push('error', `读取模型配置失败：${String(e)}`)
     }
@@ -82,9 +85,14 @@ export default function NovaPage(props: { seed?: string }): JSX.Element {
 
   useEffect(() => {
     void loadConfig()
+    void request<{ loggedIn: boolean; displayName?: string; userId?: string }>('starcloud.state')
+      .then((s) => setSession(s))
+      .catch(() => setSession(null))
   }, [loadConfig])
 
-  const configured = config.baseUrl.length > 0 && config.model.length > 0
+  // 可用通道：自接模型，或已登录且开了云端中转（Starcloud ID 下发的 Key）
+  const configured =
+    (config.baseUrl.length > 0 && config.model.length > 0) || (signedIn && useCloud)
 
   async function saveConfig(): Promise<void> {
     try {
@@ -157,7 +165,7 @@ export default function NovaPage(props: { seed?: string }): JSX.Element {
     const text = input.trim()
     if (text === '' || busy) return
     if (!configured) {
-      push('info', '先在「模型设置」里填好 Base URL 与模型名')
+      push('info', '先在「模型设置」里填好 Base URL 与模型名，或登录 Starcloud ID 使用云端模型')
       return
     }
     setInput('')
@@ -190,12 +198,11 @@ export default function NovaPage(props: { seed?: string }): JSX.Element {
         <SectionCard
           title="Nova 账户"
           action={
-            <button
-              className="btn btn-sm"
-              onClick={() => push('info', 'Starcloud ID 登录：内核能力接入后可用')}
-            >
-              登录
-            </button>
+            signedIn ? undefined : (
+              <button className="btn btn-sm" onClick={() => props.onGoLogin?.()}>
+                登录
+              </button>
+            )
           }
         >
           <div className="t-cap" style={{ marginBottom: 10 }}>
@@ -204,8 +211,12 @@ export default function NovaPage(props: { seed?: string }): JSX.Element {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <IconSparkle size={18} style={{ color: 'var(--accent)' }} />
             <div style={{ flex: 1 }}>
-              <div className="t-body">未登录</div>
-              <div className="t-meta">当前使用下面接入的本地模型</div>
+              <div className="t-body">{signedIn ? session?.displayName ?? '已登录' : '未登录'}</div>
+              <div className="t-meta">
+                {signedIn
+                  ? session?.userId ?? ''
+                  : '当前使用下面接入的本地模型'}
+              </div>
             </div>
           </div>
         </SectionCard>
@@ -227,9 +238,20 @@ export default function NovaPage(props: { seed?: string }): JSX.Element {
           </div>
           <Toggle
             checked={useCloud}
-            disabled={true}
+            disabled={!signedIn}
             label="使用云端模型"
-            onChange={setUseCloud}
+            onChange={(v) => {
+              setUseCloud(v)
+              // 写回设置（NovaGatewayEnabled）：决定 Nova 走云端中转还是自接模型
+              void request<NovaConfig>('nova.config.set', {
+                baseUrl: config.baseUrl,
+                apiKey: config.apiKey,
+                model: config.model,
+                gatewayEnabled: v
+              })
+                .then((r) => setConfig(r))
+                .catch((e) => push('error', `保存云端开关失败：${String(e)}`))
+            }}
           />
           <div className="t-cap" style={{ marginTop: 10 }}>
             未登录时不可用；关掉后 Nova 只用下面接入的模型。
@@ -330,7 +352,7 @@ export default function NovaPage(props: { seed?: string }): JSX.Element {
             <div className="t-cap" style={{ padding: '16px 0' }}>
               {configured
                 ? '问点什么吧：查版本、算配置、写指令都可以。'
-                : '先在「模型设置」里填好 Base URL 与模型名。'}
+                : '先在「模型设置」里填好 Base URL 与模型名，或登录 Starcloud ID 使用云端模型。'}
             </div>
           )}
           {messages.map((m) => (
