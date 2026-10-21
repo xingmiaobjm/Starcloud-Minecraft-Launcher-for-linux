@@ -364,6 +364,76 @@ const MOCK_ACCOUNTS: GameAccount[] = [
   }
 ]
 
+// ── 好友（starcloud.* / friends.*）的浏览器调试 mock ─────────────────────────
+
+const MOCK_SESSION = {
+  loggedIn: true,
+  userId: 'sc-mock0001',
+  displayName: '星云',
+  channel: 'cloud',
+  loginAt: ago(30)
+}
+
+const MOCK_FRIENDS = [
+  { user_id: 'sc-u2', id: 'nova_fan', display_name: '小星', since: ago(120), unread: 2 },
+  { user_id: 'sc-u3', id: 'steve_dev', display_name: 'Steve', since: ago(2000), unread: 0 }
+]
+
+const MOCK_REQUESTS = {
+  incoming: [
+    {
+      request_id: 'r1',
+      message: '加个好友？一起联机',
+      created_at: ago(2),
+      user: { user_id: 'sc-u4', id: 'alex_2026', display_name: 'Alex' }
+    }
+  ],
+  outgoing: []
+}
+
+const MOCK_INVITES = {
+  incoming: [
+    {
+      invite_id: 'i1',
+      from_user_id: 'sc-u2',
+      to_user_id: 'sc-mock0001',
+      address: 'play.example.com',
+      port: 25565,
+      message: '来玩生存服',
+      status: 'pending',
+      created_at: ago(1),
+      expires_at: new Date(MOCK_NOW + 600_000).toISOString(),
+      user: { user_id: 'sc-u2', id: 'nova_fan', display_name: '小星' },
+      connectionText: 'play.example.com:25565'
+    }
+  ],
+  outgoing: []
+}
+
+const MOCK_CONVERSATION = [
+  {
+    id: 101,
+    from_user_id: 'sc-u2',
+    to_user_id: 'sc-mock0001',
+    content: '在吗？',
+    created_at: ago(3)
+  },
+  {
+    id: 102,
+    from_user_id: 'sc-mock0001',
+    to_user_id: 'sc-u2',
+    content: '在的，怎么了',
+    created_at: ago(2.8)
+  },
+  {
+    id: 103,
+    from_user_id: 'sc-u2',
+    to_user_id: 'sc-mock0001',
+    content: '晚上一起开个生存服？我把邀请码发你',
+    created_at: ago(2.5)
+  }
+]
+
 const MOCK_SKINS: SkinEntry[] = [
   {
     id: 'sk0a1b2c3d4e5',
@@ -799,6 +869,69 @@ function mockOf(method: string, p: Record<string, unknown>): unknown {
           skinModel: p.model === undefined ? undefined : String(p.model)
         }
       } satisfies SetSkinResult
+    case 'starcloud.state':
+      return MOCK_SESSION
+    case 'starcloud.login':
+      return { ...MOCK_SESSION, loggedIn: true }
+    case 'starcloud.sendCode':
+      return { retryAfter: 60 }
+    case 'starcloud.register':
+    case 'starcloud.logout':
+      return { ok: true }
+    case 'friends.list':
+      return { signedIn: true, friends: MOCK_FRIENDS }
+    case 'friends.requests':
+      return { signedIn: true, requests: MOCK_REQUESTS }
+    case 'friends.search':
+      return {
+        results: [
+          { user_id: 'sc-u5', id: String(p.query ?? 'player'), display_name: '找到的玩家', relation: 'none' },
+          { user_id: 'sc-u4', id: 'alex_2026', display_name: 'Alex', relation: 'incoming' }
+        ]
+      }
+    case 'friends.sendRequest':
+    case 'friends.acceptRequest':
+    case 'friends.rejectRequest':
+    case 'friends.cancelRequest':
+    case 'friends.remove':
+    case 'friends.acceptInvite':
+    case 'friends.declineInvite':
+    case 'friends.cancelInvite':
+    case 'friends.markRead':
+      return { ok: true, updated: 1 }
+    case 'friends.invites':
+      return { signedIn: true, invites: MOCK_INVITES }
+    case 'friends.createInvite':
+      return {
+        invite: {
+          invite_id: 'i-new',
+          from_user_id: 'sc-mock0001',
+          to_user_id: String(p.userId ?? ''),
+          address: p.address === undefined ? undefined : String(p.address),
+          port: p.port === undefined ? undefined : Number(p.port),
+          roomCode: p.roomCode === undefined ? undefined : String(p.roomCode),
+          message: p.message === undefined ? undefined : String(p.message),
+          status: 'pending',
+          created_at: new Date(MOCK_NOW).toISOString(),
+          expires_at: new Date(MOCK_NOW + 600_000).toISOString(),
+          user: MOCK_FRIENDS[0],
+          connectionText: String(p.roomCode ?? `${String(p.address ?? '')}:${String(p.port ?? '')}`)
+        }
+      }
+    case 'friends.conversation':
+      return {
+        page: { items: MOCK_CONVERSATION, has_more: false, next_before_id: undefined }
+      }
+    case 'friends.send':
+      return {
+        message: {
+          id: Date.now(),
+          from_user_id: 'sc-mock0001',
+          to_user_id: String(p.userId ?? ''),
+          content: String(p.content ?? ''),
+          created_at: new Date().toISOString()
+        }
+      }
     default:
       return {}
   }

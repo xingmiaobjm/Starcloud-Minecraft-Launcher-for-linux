@@ -1,5 +1,5 @@
 /// 账户页：对齐 Win 端 AccountsPage + AccountAddPage ——
-/// 顶部云账号卡（Starcloud ID，未接内核时显示未登录）+ 游戏账户区（皮肤头像、类型、首选芯片）。
+/// 顶部云账号卡（Starcloud ID：登录 / 注册 / 退出）+ 游戏账户区（皮肤头像、类型、首选芯片）。
 ///
 /// 「添加账户」对齐 Win 端 AccountAddPage 的三条互不替代的身份路径：
 /// · 微软账户 = **设备码流程**（拿一次性验证码 → 用系统浏览器打开验证站点 → 轮询授权），
@@ -17,6 +17,7 @@ import type {
   GameAccount,
   MicrosoftPollResult
 } from '../bridge'
+import type { ScSession } from '../bridge-friends'
 import { EmptyState, Modal, Segmented, SkeletonList, useToasts } from '../ui'
 import { IconClose, IconChevronRight } from '../icons'
 
@@ -52,6 +53,15 @@ export default function AccountsPage(): JSX.Element {
   const [pendingRemove, setPendingRemove] = useState<GameAccount | null>(null)
   /** 账户详情弹层（Win 端 AccountDetailPage 的模态等价） */
   const [detailFor, setDetailFor] = useState<GameAccount | null>(null)
+
+  // ── Starcloud ID（Win 端 AccountsPage 的云账号卡：登录 / 注册 / 退出） ──
+  const [sc, setSc] = useState<ScSession | null>(null)
+  const [scId, setScId] = useState('')
+  const [scPwd, setScPwd] = useState('')
+  const [scBusy, setScBusy] = useState(false)
+  const [scError, setScError] = useState('')
+  const [scRegisterOpen, setScRegisterOpen] = useState(false)
+  const [scLogoutOpen, setScLogoutOpen] = useState(false)
 
   // ── 添加账户弹窗 ──
   const [addOpen, setAddOpen] = useState(false)
@@ -99,9 +109,48 @@ export default function AccountsPage(): JSX.Element {
     setLoading(false)
   }, [push])
 
+  const loadSc = useCallback(async (): Promise<void> => {
+    try {
+      setSc(await request<ScSession>('starcloud.state'))
+    } catch {
+      setSc(null)
+    }
+  }, [])
+
   useEffect(() => {
     void load()
-  }, [load])
+    void loadSc()
+  }, [load, loadSc])
+
+  /** Starcloud ID 登录（失败原样显示后端错误，与 Win 端一致）。 */
+  async function doScLogin(): Promise<void> {
+    if (scBusy) return
+    setScBusy(true)
+    setScError('')
+    try {
+      const session = await request<ScSession>('starcloud.login', {
+        id: scId.trim(),
+        password: scPwd
+      })
+      setSc(session)
+      setScPwd('')
+      push('success', '已登录，在线功能已就绪')
+    } catch (e) {
+      setScError(String(e))
+    }
+    setScBusy(false)
+  }
+
+  async function doScLogout(): Promise<void> {
+    try {
+      await request('starcloud.logout')
+      setSc(null)
+      push('success', '已退出 Starcloud ID')
+    } catch (e) {
+      push('error', `退出失败：${String(e)}`)
+    }
+    setScLogoutOpen(false)
+  }
 
   // 组件卸载时停掉轮询：设备码在微软侧有有效期，但更重要的是别在页面
   // 已经不在时继续往桥接灌请求。
@@ -292,9 +341,9 @@ export default function AccountsPage(): JSX.Element {
   return (
     <div className="page">
       <div className="page-body" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {/* 云账号卡（Win 端：Starcloud ID） */}
+        {/* 云账号卡（Win 端：Starcloud ID 登录 / 会话管理） */}
         <div className="card" style={{ padding: '18px 22px' }}>
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
             <div
               style={{
                 width: 44,
@@ -310,20 +359,105 @@ export default function AccountsPage(): JSX.Element {
                 flexShrink: 0
               }}
             >
-              ?
+              {sc?.loggedIn === true && (sc.displayName ?? '').trim() !== ''
+                ? (sc.displayName ?? '').trim()[0].toUpperCase()
+                : '?'}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="t-strong">未登录 Starcloud ID</div>
-              <div className="t-cap">登录后可使用云端模型、邀请与时刻等在线能力</div>
+              {sc?.loggedIn === true ? (
+                <>
+                  <div className="t-strong">{sc.displayName}</div>
+                  <div className="t-cap">{sc.userId}</div>
+                </>
+              ) : (
+                <>
+                  <div className="t-strong">未登录 Starcloud ID</div>
+                  <div className="t-cap">登录后可使用好友、联机邀请等在线能力</div>
+                </>
+              )}
             </div>
-            <button
-              className="btn btn-primary"
-              onClick={() => push('info', 'Starcloud ID 登录：内核能力接入后可用')}
-            >
-              登录
-            </button>
+            {sc?.loggedIn === true ? (
+              <button className="btn btn-danger" onClick={() => setScLogoutOpen(true)}>
+                退出登录
+              </button>
+            ) : null}
           </div>
+
+          {sc?.loggedIn !== true && (
+            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="input"
+                  style={{ flex: 1 }}
+                  placeholder="Starcloud ID"
+                  value={scId}
+                  onChange={(e) => setScId(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void doScLogin()
+                  }}
+                />
+                <input
+                  className="input"
+                  style={{ flex: 1 }}
+                  type="password"
+                  placeholder="密码"
+                  value={scPwd}
+                  onChange={(e) => setScPwd(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void doScLogin()
+                  }}
+                />
+              </div>
+              {scError !== '' && (
+                <div style={{ color: 'var(--danger)', fontSize: 12 }}>{scError}</div>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-primary"
+                  style={{ fontWeight: 600 }}
+                  disabled={scBusy}
+                  onClick={() => void doScLogin()}
+                >
+                  登录
+                </button>
+                <button className="btn" onClick={() => setScRegisterOpen(true)}>
+                  注册
+                </button>
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* 退出登录确认（Win ThemedDialog 文案） */}
+        <Modal
+          open={scLogoutOpen}
+          title="退出登录"
+          onClose={() => setScLogoutOpen(false)}
+          width={420}
+          footer={
+            <>
+              <button className="btn" onClick={() => setScLogoutOpen(false)}>
+                取消
+              </button>
+              <button className="btn btn-danger" onClick={() => void doScLogout()}>
+                退出
+              </button>
+            </>
+          }
+        >
+          退出后本地登录状态将被清除，确定退出吗？
+        </Modal>
+
+        {/* 注册小窗（邮箱验证码 + 账密；成功后回填登录框） */}
+        <ScRegisterDialog
+          open={scRegisterOpen}
+          onClose={() => setScRegisterOpen(false)}
+          onRegistered={(id) => {
+            setScId(id)
+            setScPwd('')
+            push('success', '注册成功，请登录')
+          }}
+        />
 
         {/* 游戏账户区 */}
         <div>
@@ -764,5 +898,134 @@ export default function AccountsPage(): JSX.Element {
 
       {host}
     </div>
+  )
+}
+// ── Starcloud ID 注册（Win RegisterDialog：先发邮箱验证码，再提交账密） ──────
+
+function ScRegisterDialog(props: {
+  open: boolean
+  onClose: () => void
+  onRegistered: (id: string) => void
+}): JSX.Element | null {
+  const [regId, setRegId] = useState('')
+  const [regPwd, setRegPwd] = useState('')
+  const [regEmail, setRegEmail] = useState('')
+  const [regCode, setRegCode] = useState('')
+  const [cooldown, setCooldown] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!props.open) return
+    setError('')
+    setBusy(false)
+  }, [props.open])
+
+  // 验证码冷却倒计时（服务端给 retry_after，取不到就按 60 秒）
+  useEffect(() => {
+    if (cooldown <= 0) return
+    const t = window.setTimeout(() => setCooldown((c) => c - 1), 1000)
+    return () => window.clearTimeout(t)
+  }, [cooldown])
+
+  const sendCode = useCallback(async (): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      const r = await request<{ retryAfter: number }>('starcloud.sendCode', {
+        email: regEmail
+      })
+      setCooldown(r.retryAfter > 0 ? r.retryAfter : 60)
+    } catch (e) {
+      setError(String(e))
+    }
+    setBusy(false)
+  }, [regEmail])
+
+  const submit = useCallback(async (): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      await request('starcloud.register', {
+        id: regId,
+        password: regPwd,
+        email: regEmail,
+        code: regCode
+      })
+      props.onRegistered(regId.trim())
+      setRegId('')
+      setRegPwd('')
+      setRegEmail('')
+      setRegCode('')
+      props.onClose()
+    } catch (e) {
+      setError(String(e))
+    }
+    setBusy(false)
+  }, [regCode, regEmail, regId, regPwd, props])
+
+  return (
+    <Modal
+      open={props.open}
+      title="注册 Starcloud ID"
+      onClose={props.onClose}
+      width={440}
+      footer={
+        <>
+          <button className="btn" onClick={props.onClose}>
+            取消
+          </button>
+          <button
+            className="btn btn-primary"
+            style={{ fontWeight: 600 }}
+            disabled={busy}
+            onClick={() => void submit()}
+          >
+            注册
+          </button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <input
+          className="input"
+          placeholder="邮箱地址"
+          value={regEmail}
+          onChange={(e) => setRegEmail(e.target.value)}
+        />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            placeholder="邮箱验证码"
+            value={regCode}
+            onChange={(e) => setRegCode(e.target.value)}
+          />
+          <button
+            className="btn"
+            style={{ padding: '0 14px' }}
+            disabled={busy || cooldown > 0}
+            onClick={() => void sendCode()}
+          >
+            {cooldown > 0 ? `重新发送（${cooldown}s）` : '发送验证码'}
+          </button>
+        </div>
+        <input
+          className="input"
+          placeholder="Starcloud ID（不超过 64 个字符）"
+          maxLength={64}
+          value={regId}
+          onChange={(e) => setRegId(e.target.value)}
+        />
+        <input
+          className="input"
+          type="password"
+          placeholder="密码（至少 6 位）"
+          value={regPwd}
+          onChange={(e) => setRegPwd(e.target.value)}
+        />
+        {error !== '' && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+      </div>
+    </Modal>
   )
 }

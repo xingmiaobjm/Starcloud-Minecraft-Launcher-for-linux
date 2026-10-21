@@ -7,7 +7,7 @@
 /// | 版本      | 鸿蒙图标库                   | U+EA94                            |
 /// | 下载      | 鸿蒙图标库                   | U+E90C                            |
 /// | 存档      | 鸿蒙图标库                   | U+EA90                            |
-/// | 联机      | 鸿蒙图标库                   | U+EB91                            |
+/// | 好友      | 鸿蒙图标库                   | U+EB91（0.3.7 起联机并入好友页）  |
 /// | 实验室    | **自绘 SVG**                  | Assets/Brand/lab-nav.svg           |
 /// | 投影管理  | **自绘 SVG**                  | Assets/Brand/projection-nav.svg    |
 /// | 运行状态  | 鸿蒙图标库                   | U+EC3B（带运行中绿点）            |
@@ -32,7 +32,7 @@ export type PageKey =
   | 'versions'
   | 'download'
   | 'saves'
-  | 'multiplayer'
+  | 'friends'
   | 'lab'
   | 'projections'
   | 'running'
@@ -63,7 +63,7 @@ const NAV: NavEntry[] = [
   { key: 'versions', label: '版本', group: 'game', order: 1, icon: { kind: 'glyph', code: String.fromCharCode(0xEA94) } },
   { key: 'download', label: '下载', group: 'game', order: 2, icon: { kind: 'glyph', code: String.fromCharCode(0xE90C) } },
   { key: 'saves', label: '存档', group: 'game', order: 3, icon: { kind: 'glyph', code: String.fromCharCode(0xEA90) } },
-  { key: 'multiplayer', label: '联机', group: 'extra', order: 0, icon: { kind: 'glyph', code: String.fromCharCode(0xEB91) } },
+  { key: 'friends', label: '好友', group: 'game', order: 4, icon: { kind: 'glyph', code: String.fromCharCode(0xEB91) } },
   { key: 'lab', label: '实验室', group: 'extra', order: 1, icon: { kind: 'svg', light: labIcon, dark: labIconDark } },
   { key: 'projections', label: '投影管理', group: 'extra', order: 2, icon: { kind: 'svg', light: projectionIcon, dark: projectionIconDark } },
   { key: 'running', label: '运行状态', group: 'extra', order: 3, icon: { kind: 'glyph', code: String.fromCharCode(0xEC3B) } },

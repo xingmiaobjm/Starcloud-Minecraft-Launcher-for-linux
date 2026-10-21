@@ -18,7 +18,7 @@ import HomePage from './pages/Home'
 import VersionsPage from './pages/Versions'
 import DownloadPage from './pages/Download'
 import SavesPage from './pages/Saves'
-import MultiplayerPage from './pages/Multiplayer'
+import FriendsPage from './pages/Friends'
 import LabPage from './pages/Lab'
 import ProjectionsPage from './pages/Projections'
 import RunningPage from './pages/Running'
@@ -59,7 +59,7 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
         'versions',
         'download',
         'saves',
-        'multiplayer',
+        'friends',
         'lab',
         'projections',
         'running',
@@ -101,8 +101,8 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
         return <DownloadPage />
       case 'saves':
         return <SavesPage />
-      case 'multiplayer':
-        return <MultiplayerPage />
+      case 'friends':
+        return <FriendsPage onGoLogin={() => setPage('accounts')} />
       case 'lab':
         return <LabPage />
       case 'projections':

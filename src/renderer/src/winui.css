@@ -1206,3 +1206,129 @@ input[type='range']::-moz-range-thumb {
 }
 
 /* 图标任务（调度中心）：三条横线 */
+
+/* ═══ 好友页（Win 0.3.7 FriendsPage：QQ 式两栏） ═══════════════════════ */
+
+/* 会话列表 / 聊天两栏由页面内联 grid 控制（300px + 1fr） */
+
+/* 会话行：头像 + 名字/预览 + 时间/未读 */
+.fr-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 7px 8px;
+  margin: 1px 0;
+  border-radius: var(--r-sm);
+  align-items: center;
+  cursor: pointer;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  transition: background var(--t-hover-in) var(--e-fade);
+}
+.fr-row:hover { background: var(--surface-subtle); }
+.fr-row-active { background: var(--surface-hover); }
+.fr-row-active:hover { background: var(--surface-hover); }
+
+/* 圆形头像（品牌黄底 + 首字母，与 Win 端 AccentFillColorDefaultBrush 圆一致） */
+.fr-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 16px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.fr-avatar-sm { width: 32px; height: 32px; font-size: 14px; }
+
+.fr-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.fr-preview { font-size: 11px; color: var(--text-secondary); }
+.fr-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.fr-time { font-size: 10px; color: var(--text-tertiary); white-space: nowrap; }
+
+/* 未读徽标（Win SystemFillColorCriticalBrush 小圆片） */
+.fr-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* 聊天头部 */
+.fr-chat-head {
+  display: flex;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--stroke-divider);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* 消息区 */
+.fr-msgs {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fr-msg { display: flex; gap: 8px; align-items: flex-start; }
+.fr-msg-mine { flex-direction: row-reverse; }
+.fr-bubble {
+  max-width: min(520px, 76%);
+  border-radius: 10px;
+  padding: 7px 10px;
+  font-size: 13px;
+  line-height: 1.55;
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+.fr-bubble-mine { background: var(--accent); color: var(--text-on-accent); }
+.fr-time-sep {
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin: 6px 0;
+}
+
+/* 输入区 */
+.fr-composer {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--stroke-divider);
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+.fr-composer .input { flex: 1; }
+
+/* 小窗里的行（添加好友 / 申请 / 邀请） */
+.fr-dialog-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  padding: 4px 0;
+  align-items: center;
+}
