@@ -52,6 +52,10 @@ export default function SavesPage(): JSX.Element {
   const [versionFilter, setVersionFilter] = useState('全部')
   const [busy, setBusy] = useState(false)
 
+  // 选中/缩略图的键必须带 gameRoot：版本隔离下每个版本都有自己的
+  // saves/新世界，只按 folderName 记录会一点选一片（用户实测：点一个亮四个）。
+  const saveKey = (s: SaveInfo): string => `${s.gameRoot}/${s.folderName}`
+
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
     try {
@@ -61,7 +65,7 @@ export default function SavesPage(): JSX.Element {
       for (const s of data.saves) {
         if (s.iconPath === undefined || s.iconPath === '') continue
         void request<{ dataUrl: string }>('saves.icon', { path: s.iconPath })
-          .then((r) => setIcons((prev) => ({ ...prev, [s.folderName]: r.dataUrl })))
+          .then((r) => setIcons((prev) => ({ ...prev, [`${s.gameRoot}/${s.folderName}`]: r.dataUrl })))
           .catch(() => undefined)
       }
     } catch (e) {
@@ -94,7 +98,7 @@ export default function SavesPage(): JSX.Element {
     })
   }, [saves, query, versionFilter])
 
-  const selectedSaves = filtered.filter((s) => selected.has(s.folderName))
+  const selectedSaves = filtered.filter((s) => selected.has(saveKey(s)))
 
   async function openFolder(save?: SaveInfo): Promise<void> {
     setBusy(true)
@@ -227,13 +231,14 @@ export default function SavesPage(): JSX.Element {
             />
           )}
           {filtered.map((s) => {
-            const icon = icons[s.folderName]
-            const checked = selected.has(s.folderName)
+            const key = saveKey(s)
+            const icon = icons[key]
+            const checked = selected.has(key)
             return (
               <div
-                key={s.gameRoot + '/' + s.folderName}
+                key={key}
                 className={`row${checked ? ' row-active' : ''}`}
-                onClick={() => toggle(s.folderName)}
+                onClick={() => toggle(key)}
               >
                 {/* 64px 世界缩略图（Win 端同尺寸） */}
                 <div
