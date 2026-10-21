@@ -92,7 +92,43 @@ tools/                 取证与截图脚本（非运行时依赖）
 | Wayland 下标题栏拖不动 | `-webkit-app-region` 依赖 X11 `_NET_WM_MOVERESIZE` | 标题栏内置 JS 拖拽兜底（IPC `win:moveBy`） |
 | `backdrop-filter` 掉帧 | 软件渲染 / WSLg 无 GPU | 模糊只铺装饰层，可关 |
 | 字体缺字 / 图标空白 | 依赖 CDN 字体 | 字体与图标字体全部本地打包 |
-| root / 容器里起不来 | Chromium 沙箱不可用 | `ELECTRON_DISABLE_SANDBOX=1` |
+| root / 容器 / WSL 里起不来 | Chromium 沙箱不可用，且根检查早于 `app.commandLine` | **命令行**传 `--no-sandbox`（见下方 WSL 一节） |
+
+## WSL 实机测试
+
+WSL2 + WSLg（Ubuntu 24.04 已验证）可以直接跑起来，UI 与桥接都是真环境：
+
+```bash
+# 0) 仓库先拷出 /mnt/c（九宫格文件系统上 npm install 又慢又容易半途失败）
+rsync -a --exclude node_modules --exclude out --exclude 'bridge-*-x64' \
+  /mnt/c/<你的路径>/starcloud-launcher-linux/ ~/sc-linux/
+cd ~/sc-linux
+
+# 1) 依赖（国内网络用 Electron 镜像，否则二进制下载会卡住/失败）
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ npm install
+
+# 2) 桥接（WSL 里装 .NET SDK 8+；用主仓源码发布 linux-x64 产物）
+dotnet publish /mnt/c/<你的路径>/starcloud-minecraft-launcher/dotnet/src/Starcloud.Bridge \
+  -c Release -r linux-x64 --self-contained false -o bridge-linux-x64
+
+# 3) 构建 + 启动（--no-sandbox 必须走命令行参数，写在 app 代码里来不及）
+npm run build
+./node_modules/.bin/electron . --no-sandbox --disable-gpu
+```
+
+截图取证（无窗口环境也能用，产物是 PNG）：
+
+```bash
+STARCLOUD_SCREENSHOT=/root/shot.png STARCLOUD_SCREENSHOT_PAGE=friends \
+  ./node_modules/.bin/electron . --no-sandbox --disable-gpu
+```
+
+两个 WSL 特有的坑：
+
+- **一次性 `wsl.exe` 命令结束后虚拟机就会停**，`/tmp` 是内存盘会被清空。
+  产物放 `~`，并在同一条命令里 `cp` 到 `/mnt/c`，否则下一次调用就找不到了。
+- 启动/退出瞬间的 `GPU process launch failed` / `GPU process isn't usable`
+  是 WSLg 下 GPU 进程被回收的噪音；加 `--disable-gpu` 后 UI 由软件渲染正常显示。
 
 ## 打包
 
