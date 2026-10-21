@@ -1334,3 +1334,42 @@ input[type='range']::-moz-range-thumb {
   padding: 4px 0;
   align-items: center;
 }
+
+/* ═══ 皮肤选择器（Win AccountDetailPage 的卡片网格） ═══════════════════ */
+.skin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+}
+.skin-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--stroke-subtle);
+  background: var(--surface-subtle);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--t-hover-in) var(--e-fade),
+    border-color var(--t-hover-in) var(--e-fade);
+}
+.skin-card:hover { background: var(--surface-hover); }
+.skin-card-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.skin-card-fig {
+  width: 100%;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.skin-add {
+  border-style: dashed;
+  justify-content: center;
+  min-height: 142px;
+}

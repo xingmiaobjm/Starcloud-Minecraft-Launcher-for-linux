@@ -19,7 +19,8 @@ import type {
   SkinResult
 } from '../bridge'
 import { EmptyState, Modal, Segmented, SkeletonList, Spinner, useToasts } from '../ui'
-import { IconRefresh, IconUser, IconChevronRight, IconInfo } from '../icons'
+import { IconRefresh, IconUser, IconInfo } from '../icons'
+import SkinFigure from '../SkinFigure'
 
 /** 型号三档（与内核 SkinModels 的 auto / classic / slim 一一对应）。 */
 const MODEL_OPTIONS: Array<{ value: SkinModel; label: string }> = [
@@ -134,6 +135,8 @@ export default function SkinsPage(props: {
   const [accounts, setAccounts] = useState<GameAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [icons, setIcons] = useState<Record<string, string>>({})
+  /** 原始皮肤纹理（3D 小人要用整张 PDF 纹理，不能用拼好的立绘图） */
+  const [rawIcons, setRawIcons] = useState<Record<string, string>>({})
   const [iconFailed, setIconFailed] = useState<Set<string>>(new Set())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -169,6 +172,7 @@ export default function SkinsPage(props: {
         void api
           .skinIcon(s.path)
           .then(async (dataUrl) => {
+            setRawIcons((prev) => ({ ...prev, [s.id]: dataUrl }))
             // 原始纹理 → 正面小人立绘（失败回落原始 PNG）
             const figure = await renderFigure(dataUrl)
             setIcons((prev) => ({ ...prev, [s.id]: figure ?? dataUrl }))
@@ -341,7 +345,8 @@ export default function SkinsPage(props: {
     }
   }
 
-  const selectedIcon = selected === null ? undefined : icons[selected.id]
+  /** 焦点账户（从账户详情进来时）：左栏的「应用到」直接对着它 */
+  const focusAccount = accounts.find((a) => a.uuid === props.accountUuid)
 
   return (
     <div className="page">
@@ -395,228 +400,234 @@ export default function SkinsPage(props: {
 
       <div className="page-body">
         <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-          {/* ── 左：皮肤列表 ── */}
+          {/* ── 左：3D 形象 + 当前皮肤信息与操作（Win 端 SkinPanel 左栏） ── */}
+          <div style={{ width: 340, minWidth: 340, flexShrink: 0 }}>
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <SkinFigure
+                texture={selected === null ? undefined : rawIcons[selected.id]}
+                height={300}
+              />
+              <div
+                style={{
+                  padding: '2px 18px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10
+                }}
+              >
+                <div>
+                  <div className="t-strong truncate" style={{ fontSize: 16 }}>
+                    {selected === null ? '还没有选中皮肤' : selected.name}
+                  </div>
+                  <div className="t-cap">
+                    {selected === null
+                      ? '在右侧衣柜里挑一张，小人会实时换装'
+                      : `${selected.width}×${selected.height} · ${MODEL_LABEL[normalizeModel(selected.model)]} · ${SOURCE_LABEL[selected.source] ?? selected.source}`}
+                  </div>
+                </div>
+
+                {selected !== null && focusAccount !== undefined && (
+                  <div className="t-cap">
+                    {boundBy.get(focusAccount.uuid) === selected.id
+                      ? `${focusAccount.name} 正在使用这张皮肤`
+                      : `应用到 ${focusAccount.name} 后，下次启动游戏生效`}
+                  </div>
+                )}
+
+                {selected !== null && (
+                  <>
+                    <div>
+                      <div className="t-cap" style={{ marginBottom: 4 }}>
+                        型号
+                      </div>
+                      <Segmented<SkinModel>
+                        value={normalizeModel(selected.model)}
+                        options={MODEL_OPTIONS}
+                        disabled={busy}
+                        onChange={(v) => void setModel(v)}
+                      />
+                    </div>
+
+                    {/* 应用到该账户（Win：正版账户同样是本机注入，不动微软官方皮肤） */}
+                    {focusAccount !== undefined ? (
+                      boundBy.get(focusAccount.uuid) === selected.id ? (
+                        <button
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => void bind(focusAccount, null)}
+                        >
+                          取消绑定（恢复默认形象）
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-primary"
+                          style={{ fontWeight: 600 }}
+                          disabled={busy}
+                          onClick={() => void bind(focusAccount, selected.id)}
+                        >
+                          应用到 {focusAccount.name}
+                        </button>
+                      )
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div className="t-cap">绑定到账户</div>
+                        {bindableAccounts.length === 0 && (
+                          <div className="t-cap">
+                            还没有支持本地皮肤的账户（离线 / 微软账户）。
+                          </div>
+                        )}
+                        {bindableAccounts.map((acc) => {
+                          const bound = boundBy.get(acc.uuid) === selected.id
+                          return (
+                            <div
+                              key={acc.uuid}
+                              className="row row-static"
+                              style={{ minHeight: 0, padding: '6px 0' }}
+                            >
+                              <span className="t-body truncate" style={{ flex: 1 }}>
+                                {acc.name}
+                              </span>
+                              {bound ? (
+                                <>
+                                  <span className="chip chip-accent">使用中</span>
+                                  <button
+                                    className="btn btn-subtle btn-sm"
+                                    disabled={busy}
+                                    onClick={() => void bind(acc, null)}
+                                  >
+                                    取消绑定
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  className="btn btn-sm"
+                                  disabled={busy}
+                                  onClick={() => void bind(acc, selected.id)}
+                                >
+                                  应用
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="btn"
+                        style={{ flex: 1 }}
+                        onClick={() => {
+                          setRenameTarget(selected)
+                          setRenameValue(selected.name)
+                        }}
+                      >
+                        重命名
+                      </button>
+                      <button className="btn btn-danger" onClick={() => setDeleteTarget(selected)}>
+                        删除
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                <div className="t-cap" style={{ fontSize: 11 }}>
+                  拖拽小人转视角，滚轮缩放。本机注入：只改你本机看到的形象，
+                  不会修改或上传微软账号上的官方皮肤；游戏内 1.19.3 起客户端要求签名属性，
+                  本机注入不保证生效。
+                </div>
+              </div>
+            </div>
+
+            {focusAccount !== undefined && focusAccount.type === 'external' && (
+              <div className="info info-info" style={{ marginTop: 12 }}>
+                <IconInfo size={14} />
+                <div className="info-body">
+                  外置（第三方）账户的皮肤由皮肤站决定，本地皮肤库对它们不生效 ——
+                  在皮肤站更换即可。
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── 右：我的皮肤（Win 卡片网格；首格「添加皮肤」，支持拖入 PNG 见下） ── */}
           <div className="card card-flush" style={{ flex: 1, minWidth: 0 }}>
             <div className="card-head">
               <span className="card-title">我的皮肤</span>
               <span className="chip">{skins.length} 张</span>
+              <div style={{ flex: 1 }} />
+              <span className="t-cap">点卡片试穿，再「应用」到账户</span>
             </div>
-            <div style={{ padding: '0 12px 12px' }}>
-              {loading && <SkeletonList rows={4} avatar />}
-              {!loading && skins.length === 0 && (
-                <EmptyState
-                  title="皮肤库还是空的"
-                  hint="导入一张本地皮肤 PNG，或从皮肤站的图片链接导入。支持 64×32 / 64×64 及其等比放大。"
-                  action={
-                    <button className="btn btn-primary" onClick={() => setImportOpen(true)}>
-                      导入本地文件
-                    </button>
-                  }
-                />
-              )}
-              {skins.map((skin, index) => {
-                const icon = icons[skin.id]
-                const failed = iconFailed.has(skin.id)
-                const model = normalizeModel(skin.model)
-                const usedBy = accounts.filter((a) => boundBy.get(a.uuid) === skin.id)
-                return (
-                  <div
-                    key={skin.id}
-                    className={`row${skin.id === selectedId ? ' row-active' : ''}`}
-                    style={{ minHeight: 72, animationDelay: `${index * 39}ms` }}
-                    onClick={() => setSelectedId(skin.id)}
+            <div style={{ padding: '0 14px 14px' }}>
+              {loading && <SkeletonList rows={3} avatar />}
+              {!loading && (
+                <div className="skin-grid">
+                  {/* 添加皮肤占位卡（Win 首格） */}
+                  <button
+                    className="skin-card skin-add"
+                    onClick={() => {
+                      setImportPathDraft('')
+                      setImportOpen(true)
+                    }}
+                    disabled={busy}
+                    title="导入本地皮肤"
                   >
-                    <div
-                      className="icon32"
-                      style={{ width: 48, height: 48, borderRadius: 8, overflow: 'hidden' }}
-                    >
-                      {icon !== undefined ? (
-                        <img
-                          src={icon}
-                          alt=""
-                          width={48}
-                          height={48}
-                          style={{ objectFit: 'contain' }}
-                        />
-                      ) : failed ? (
-                        <IconUser size={18} style={{ opacity: 0.5 }} />
-                      ) : (
-                        <span className="spinner" />
-                      )}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className="t-strong truncate">{skin.name}</span>
-                        {usedBy.length > 0 && (
-                          <span className="chip chip-accent">
-                            {usedBy.map((a) => a.name).join(' · ')}
-                          </span>
-                        )}
-                      </div>
-                      <div className="t-cap">
-                        {skin.width}×{skin.height} · {MODEL_LABEL[model]}
-                        {skin.source !== 'file' && skin.source !== 'url'
-                          ? ` · ${SOURCE_LABEL[skin.source] ?? skin.source}`
-                          : ` · ${SOURCE_LABEL[skin.source] ?? skin.source}`}
-                      </div>
-                    </div>
-                    <div className="meta">
-                      <span className="meta-k">来源</span>
-                      <span className="meta-v">{SOURCE_LABEL[skin.source] ?? skin.source}</span>
-                      <span className="meta-k">加入时间</span>
-                      <span className="meta-v">{addedText(skin.addedAt)}</span>
-                    </div>
-                    <IconChevronRight size={15} style={{ opacity: 0.45 }} />
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {/* ── 右：选中项的详情 + 操作 ── */}
-          <div style={{ width: 320, minWidth: 320, flexShrink: 0 }}>
-            <div
-              className="card"
-              style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
-            >
-              <div className="t-strong" style={{ fontSize: 15 }}>
-                {selected === null ? '还没有选中皮肤' : '皮肤详情'}
-              </div>
-
-              {selected === null ? (
-                <div className="t-cap">
-                  从左侧列表里挑一张皮肤，这里会显示它的详情与可做的操作。
-                </div>
-              ) : (
-                <>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <div
-                      className="icon32"
-                      style={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: 'var(--r-control)',
-                        overflow: 'hidden'
-                      }}
-                    >
-                      {selectedIcon !== undefined ? (
-                        <img
-                          src={selectedIcon}
-                          alt=""
-                          width={64}
-                          height={64}
-                          style={{ objectFit: 'contain' }}
-                        />
-                      ) : (
-                        <IconUser size={22} style={{ opacity: 0.45 }} />
-                      )}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="t-strong truncate">{selected.name}</div>
-                      <div className="t-cap">
-                        {selected.width}×{selected.height}
-                      </div>
-                      <div className="t-cap">{MODEL_LABEL[normalizeModel(selected.model)]}</div>
-                    </div>
-                  </div>
-
-                  {selected.sourceUrl !== undefined && selected.sourceUrl !== '' && (
-                    <div className="t-meta truncate" title={selected.sourceUrl}>
-                      {selected.sourceUrl}
-                    </div>
-                  )}
-                  <div className="t-cap">加入时间：{addedText(selected.addedAt)}</div>
-
-                  {/* 型号：与内核 SkinModels 的三档对应 */}
-                  <div>
-                    <div className="t-cap" style={{ marginBottom: 4 }}>
-                      型号
-                    </div>
-                    <Segmented<SkinModel>
-                      value={normalizeModel(selected.model)}
-                      options={MODEL_OPTIONS}
-                      disabled={busy}
-                      onChange={(v) => void setModel(v)}
-                    />
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      className="btn"
-                      style={{ flex: 1 }}
-                      onClick={() => {
-                        setRenameTarget(selected)
-                        setRenameValue(selected.name)
-                      }}
-                    >
-                      重命名
-                    </button>
-                    <button
-                      className="btn btn-danger"
-                      onClick={() => setDeleteTarget(selected)}
-                    >
-                      删除
-                    </button>
-                  </div>
-
-                  {/* 绑定到账户（离线 + 正版；第三方走皮肤站，本地库对它们没意义） */}
-                  <div>
-                    <div className="t-cap" style={{ marginBottom: 6 }}>
-                      绑定到账户
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {bindableAccounts.length === 0 && (
-                        <div className="t-cap">
-                          还没有支持本地皮肤的账户（离线 / 微软账户）。
-                        </div>
-                      )}
-                      {bindableAccounts.map((a) => {
-                        const bound = boundBy.get(a.uuid) === selected.id
-                        return (
-                          <div key={a.uuid} className="row row-static" style={{ minHeight: 0, padding: '6px 0' }}>
-                            <span className="t-body truncate" style={{ flex: 1 }}>
-                              {a.name}
+                    <span style={{ fontSize: 26, opacity: 0.55, lineHeight: 1 }}>＋</span>
+                    <span className="t-cap">添加皮肤</span>
+                  </button>
+                  {skins.map((skin) => {
+                    const icon = icons[skin.id]
+                    const usedBy = accounts.filter((acc) => boundBy.get(acc.uuid) === skin.id)
+                    return (
+                      <button
+                        key={skin.id}
+                        className={`skin-card${skin.id === selectedId ? ' skin-card-active' : ''}`}
+                        onClick={() => setSelectedId(skin.id)}
+                        title={skin.name}
+                      >
+                        <span className="skin-card-fig">
+                          {icon !== undefined ? (
+                            <img
+                              src={icon}
+                              alt=""
+                              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                            />
+                          ) : iconFailed.has(skin.id) ? (
+                            <IconUser size={22} style={{ opacity: 0.45 }} />
+                          ) : (
+                            <span className="spinner" />
+                          )}
+                        </span>
+                        <span
+                          className="t-strong truncate"
+                          style={{ fontSize: 12, maxWidth: '100%' }}
+                        >
+                          {skin.name}
+                        </span>
+                        <span
+                          style={{
+                            display: 'flex',
+                            gap: 4,
+                            flexWrap: 'wrap',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          {normalizeModel(skin.model) === 'slim' && (
+                            <span className="chip" style={{ height: 16, fontSize: 10 }}>
+                              纤细
                             </span>
-                            {bound ? (
-                              <>
-                                <span className="chip chip-accent">使用中</span>
-                                <button
-                                  className="btn btn-subtle btn-sm"
-                                  disabled={busy}
-                                  onClick={() => void bind(a, null)}
-                                >
-                                  取消绑定
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                className="btn btn-sm"
-                                disabled={busy}
-                                onClick={() => void bind(a, selected.id)}
-                              >
-                                应用
-                              </button>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="t-cap">
-                    本机注入：只改你本机看到的形象，不会修改或上传微软账号上的官方皮肤；
-                    游戏内 1.19.3 起客户端要求签名属性，本机注入不保证生效。
-                  </div>
-                </>
+                          )}
+                          {usedBy.length > 0 && (
+                            <span className="chip chip-accent" style={{ height: 16, fontSize: 10 }}>
+                              {usedBy.map((acc) => acc.name).join(' · ')}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               )}
-            </div>
-
-            <div className="info info-info" style={{ marginTop: 12 }}>
-              <IconInfo size={14} />
-              <div className="info-body">
-                外置（第三方）账户的皮肤由皮肤站决定，本地皮肤库对它们不生效 ——
-                在皮肤站更换即可。
-              </div>
             </div>
           </div>
         </div>

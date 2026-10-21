@@ -153,6 +153,14 @@ const FORMAT_LABEL: Record<string, string> = {
   raw: '通用压缩包'
 }
 
+/** 依赖键 → 展示名（导出时加载器类型固定，只展示）。 */
+const LOADER_DISPLAY: Record<string, string> = {
+  'fabric-loader': 'Fabric',
+  'quilt-loader': 'Quilt',
+  forge: 'Forge',
+  neoforge: 'NeoForge'
+}
+
 /** 版本名合法性（与桥接 IsValidVersionId 同规则：非空且不含路径非法字符）。 */
 function validVersionId(name: string): boolean {
   return name.trim().length > 0 && !/[<>:"/\\|?*]/.test(name)
@@ -898,24 +906,20 @@ export default function VersionsPage(props: {
               <label className="t-cap" style={{ fontSize: 12 }}>Minecraft 版本</label>
               <input className="input" value={exportMc} onChange={(e) => setExportMc(e.target.value)} />
               <label className="t-cap" style={{ fontSize: 12 }}>加载器</label>
-              <Select
-                width={220}
-                value={exportLoaderKey}
-                options={[
-                  { value: 'none', label: '无' },
-                  { value: 'fabric-loader', label: 'Fabric' },
-                  { value: 'quilt-loader', label: 'Quilt' },
-                  { value: 'forge', label: 'Forge' },
-                  { value: 'neoforge', label: 'NeoForge' }
-                ]}
-                onChange={setExportLoaderKey}
-              />
+              {/* 加载器由实例自动识别，不允许改类型（把 Fabric 包当 Forge 导出没有意义）；
+                  能改的只是它的版本号（Win 导出对话框同样只让填加载器版本）。 */}
+              <div className="t-body" style={{ fontSize: 13 }}>
+                {exportLoaderKey === 'none'
+                  ? '无（原版）'
+                  : (LOADER_DISPLAY[exportLoaderKey] ?? exportLoaderKey)}
+              </div>
               <label className="t-cap" style={{ fontSize: 12 }}>加载器版本</label>
               <input
                 className="input"
                 value={exportLoaderVer}
                 onChange={(e) => setExportLoaderVer(e.target.value)}
                 disabled={exportLoaderKey === 'none'}
+                placeholder={exportLoaderKey === 'none' ? '无加载器' : '可手动指定版本号'}
               />
             </div>
             <div className="t-strong" style={{ fontSize: 14 }}>打包内容</div>
