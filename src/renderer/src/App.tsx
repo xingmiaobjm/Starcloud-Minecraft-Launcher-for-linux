@@ -179,7 +179,13 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
           <img src={brandMark} alt="" width={18} height={18} />
         </span>
         <span className="tb-appname">Starcloud</span>
-        <span className="tb-ver">{appVersion !== '' ? `开发版 V${appVersion}` : 'Linux'}</span>
+        <span className="tb-ver">
+          {appVersion === ''
+            ? 'Linux'
+            : appVersion.includes('-')
+              ? `Beta V${appVersion.split('-')[0]}`
+              : `开发版 V${appVersion}`}
+        </span>
       </TitleBar>
       <div className="win-body">
         <Nav page={page} dark={theme.resolved === 'dark'} running={running} onNavigate={setPage} />

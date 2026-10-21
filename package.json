@@ -1,6 +1,6 @@
 {
   "name": "starcloud-launcher-linux",
-  "version": "0.1.0",
+  "version": "0.3.8-beta.1",
   "description": "Starcloud Minecraft Launcher — Linux (Electron + Fluent UI React)",
   "main": "out/main/index.js",
   "private": true,
