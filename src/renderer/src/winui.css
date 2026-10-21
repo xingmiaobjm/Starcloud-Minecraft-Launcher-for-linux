@@ -1062,6 +1062,8 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
 
 /* Flyout（右键菜单等） */
 .flyout {
+  /* 弹层绝不当拖拽把手：盖到标题栏上时，drag 区会吞掉真实点击 */
+  -webkit-app-region: no-drag;
   padding: 5px;
   border-radius: var(--r-overlay);
   background: var(--surface-acrylic);

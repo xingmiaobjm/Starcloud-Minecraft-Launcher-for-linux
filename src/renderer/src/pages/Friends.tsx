@@ -78,7 +78,7 @@ function MenuButton(props: {
   title: string
   items: Array<{ label: string; onSelect: () => void; disabled?: boolean; danger?: boolean }>
 }): JSX.Element {
-  const [rect, setRect] = useState<{ left: number; bottom: number } | null>(null)
+  const [rect, setRect] = useState<{ left: number; top: number } | null>(null)
   const ref = useRef<HTMLButtonElement | null>(null)
   const popRef = useRef<HTMLDivElement | null>(null)
   const open = rect !== null
@@ -117,7 +117,14 @@ function MenuButton(props: {
           }
           const r = ref.current?.getBoundingClientRect()
           if (r === undefined) return
-          setRect({ left: r.right - WIDTH, bottom: r.top - 6 })
+          // 默认向下弹（Win MenuFlyout 的默认方向）。向上弹会盖进标题栏的
+          // app-region: drag 区，真实点击会被拖拽吞掉（"菜单点不了"的坑）。
+          const estimated = props.items.length * 32 + 24
+          const below = window.innerHeight - r.bottom > estimated + 12
+          setRect({
+            left: r.right - WIDTH,
+            top: below ? r.bottom + 6 : Math.max(56, r.top - estimated - 6)
+          })
         }}
       >
         {props.title === '更多操作' ? <IconMore size={14} /> : <IconPlus size={14} />}
@@ -131,7 +138,7 @@ function MenuButton(props: {
             style={{
               position: 'fixed',
               left: Math.max(8, rect.left),
-              bottom: window.innerHeight - rect.bottom,
+              top: rect.top,
               width: WIDTH,
               zIndex: 900,
               padding: 6,
