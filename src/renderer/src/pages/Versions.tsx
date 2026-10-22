@@ -18,7 +18,7 @@ import neoforgeIcon from '../assets/mc-icons/neoforge.png'
 import forgeIcon from '../assets/mc-icons/forge.png'
 import fabricIcon from '../assets/mc-icons/fabric.png'
 import quiltIcon from '../assets/mc-icons/quilt.png'
-import { IconFolder, IconImport, IconRefresh, IconMore, IconTrash } from '../icons'
+import { IconFolder, IconImport, IconLink, IconRefresh, IconMore, IconTrash } from '../icons'
 
 const LOADER_ICONS: Record<string, string> = {
   neoforge: neoforgeIcon,
@@ -670,7 +670,7 @@ export default function VersionsPage(props: {
           <IconImport size={15} /> 导入整合包
         </button>
         <button className="btn" onClick={() => setLinkOpen(true)} title="从链接导入">
-          从链接导入
+          <IconLink size={15} /> 从链接导入
         </button>
         <input
           className="input"
