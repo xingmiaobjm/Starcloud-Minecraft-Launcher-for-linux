@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.3.8-beta.5
+
+### 修复
+- 联机页「安装核心」的进度与完成事件名与桥接不一致（桥接发 `multiplayer.progress` /
+  `multiplayer.install.done`，页面监听的是 `multiplayer.install` / `multiplayer.installed`）：
+  安装时进度条不出现、装完不刷新仍是「未安装」。现已按桥接事件对齐，并显示解压等阶段文案。
+
 ## 0.3.8-beta.4
 
 ### 新增

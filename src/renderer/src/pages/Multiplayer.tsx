@@ -59,6 +59,8 @@ export default function MultiplayerPage(): JSX.Element {
   const [joinCode, setJoinCode] = useState('')
   const [nickname, setNickname] = useState('')
   const [installProgress, setInstallProgress] = useState<number | null>(null)
+  const [installStage, setInstallStage] = useState('')
+  const [installing, setInstalling] = useState(false)
   const pollRef = useRef<number | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
@@ -83,13 +85,23 @@ export default function MultiplayerPage(): JSX.Element {
     onBridgeEvent((event, params) => {
       if (event === 'multiplayer.changed') {
         void load()
-      } else if (event === 'multiplayer.install') {
-        const pct = Number(params.percent ?? 0)
-        setInstallProgress(pct > 0 ? pct : null)
-      } else if (event === 'multiplayer.installed') {
+      } else if (event === 'multiplayer.progress') {
+        // 桥接的进度事件：有总量给百分比，没有总量（解压/校验阶段）就用阶段文案
+        const total = Number(params.total ?? 0)
+        const bytes = Number(params.bytes ?? 0)
+        setInstallStage(String(params.stage ?? ''))
+        setInstallProgress(total > 0 ? Math.min(100, (bytes / total) * 100) : null)
+      } else if (event === 'multiplayer.install.done') {
+        setInstalling(false)
         setInstallProgress(null)
+        setInstallStage('')
         push('success', '联机核心已安装')
         void load()
+      } else if (event === 'multiplayer.install.failed') {
+        setInstalling(false)
+        setInstallProgress(null)
+        setInstallStage('')
+        push('error', `安装失败：${String(params.error ?? '未知错误')}`)
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,22 +187,28 @@ export default function MultiplayerPage(): JSX.Element {
               <IconWarning size={14} />
               <div className="info-body" style={{ flex: 1 }}>
                 联机核心未安装。
-                {installProgress !== null && (
+                {installing && (
                   <div style={{ marginTop: 6 }}>
-                    <ProgressBar value={installProgress} />
+                    <ProgressBar value={installProgress ?? undefined} indeterminate={installProgress === null} />
+                    {installStage !== '' && (
+                      <div className="t-cap" style={{ marginTop: 4 }}>{installStage}</div>
+                    )}
                   </div>
                 )}
               </div>
               <button
                 className="btn btn-sm"
-                disabled={installProgress !== null}
+                disabled={installing}
                 onClick={() =>
                   void request('multiplayer.install')
-                    .then(() => push('info', '已开始下载联机核心'))
+                    .then(() => {
+                      setInstalling(true)
+                      push('info', '已开始下载联机核心')
+                    })
                     .catch((e) => push('error', String(e)))
                 }
               >
-                安装
+                {installing ? '安装中…' : '安装'}
               </button>
             </div>
           )}
