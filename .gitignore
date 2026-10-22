@@ -17,3 +17,13 @@ Thumbs.db
 
 # 本地取证产物
 tools/output/
+
+# AI 工具本地目录（不进版本库）
+.trae/
+.claude/
+.cursor/
+.windsurf/
+.continue/
+.copilot/
+.aider*
+.specstory/
