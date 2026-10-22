@@ -2,7 +2,8 @@
 /// 主题跟随系统（Win 端 nativeTheme → 这里 data-theme）。
 import { useEffect, useState } from 'react'
 
-import { appVersion as readAppVersion } from './bridge'
+import { appVersion as readAppVersion, nativeApi, request } from './bridge'
+import type { InstalledVersion } from './bridge'
 
 import Nav, { PAGE_LABEL, type PageKey } from './nav'
 import { useTheme } from './theme'
@@ -39,6 +40,8 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
   const [tasksOpen, setTasksOpen] = useState(false)
   // 「问 Nova」的预填文本（版本行菜单 → Nova 页自动填入输入框）
   const [novaSeed, setNovaSeed] = useState('')
+  /** 已安装版本 id 列表（复制存档到其他版本用） */
+  const [installedVersions, setInstalledVersions] = useState<string[]>([])
 
   // 启动时应用一次视觉设置（动效档位 / 背景），之后由设置页即时更新
   useEffect(() => {
@@ -52,6 +55,13 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
       .catch(() => undefined)
   }, [])
   const running = session.pid !== undefined && session.pid > 0
+
+  // 已安装版本列表：设置页的跨设备与存档页的「复制到其他版本」都要用
+  useEffect(() => {
+    void request<{ installed: InstalledVersion[] }>('catalog.installed')
+      .then((r) => setInstalledVersions(r.installed.map((v) => v.id)))
+      .catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -109,7 +119,21 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
       case 'download':
         return <DownloadPage />
       case 'saves':
-        return <SavesPage />
+        return (
+          <SavesPage
+            versions={installedVersions}
+            onSaveFile={async (defaultName, filters) => {
+              const api = nativeApi()
+              if (api === null) return null
+              return api.pickSaveFile('导出世界分享包', defaultName, filters)
+            }}
+            onOpenFile={async (filters) => {
+              const api = nativeApi()
+              if (api === null) return null
+              return api.pickFile('选择世界分享包', filters)
+            }}
+          />
+        )
       case 'friends':
         return <FriendsPage onGoLogin={() => setPage('accounts')} />
       case 'lab':
@@ -137,7 +161,20 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
       case 'logs':
         return <LogsPage session={session} />
       case 'settings':
-        return <SettingsPage theme={theme} />
+        return (
+          <SettingsPage
+            theme={theme}
+            onGoLogin={() => setPage('accounts')}
+            onOpenExternal={(url) => {
+              const api = nativeApi()
+              if (api === null) {
+                void request('shell.openPath', { path: url }).catch(() => undefined)
+                return
+              }
+              void api.openExternal(url).catch(() => undefined)
+            }}
+          />
+        )
       default:
         return <HomePage session={session} onNavigate={(t) => setPage(t)} />
     }

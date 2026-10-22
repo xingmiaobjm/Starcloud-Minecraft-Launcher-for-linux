@@ -310,6 +310,21 @@ export interface DiagReport {
   issues: DiagIssue[]
 }
 
+/** settings.checkUpdate：服务端更新清单与当前版本比对结果。 */
+export interface UpdateInfo {
+  /** 服务端发布的最新版本号 */
+  version: string
+  notes?: string
+  notesEn?: string
+  publishedAt?: string
+  /** 平台自更新能力：SilentInstall / ManualDownload */
+  capability: string
+  /** 当前启动器版本 */
+  current: string
+  hasUpdate: boolean
+  downloadUrl?: string
+}
+
 export interface NovaConfig {
   baseUrl: string
   apiKey: string

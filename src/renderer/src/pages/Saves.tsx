@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { request } from '../bridge'
 import type { SaveInfo, SaveList } from '../bridge'
-import { EmptyState, SkeletonList, useToasts, Select } from '../ui'
+import { EmptyState, Modal, SkeletonList, useToasts, Select } from '../ui'
 import { IconRefresh, IconWorld } from '../icons'
 
 function formatBytes(bytes: number): string {
@@ -42,7 +42,19 @@ function lastPlayedText(iso?: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-export default function SavesPage(): JSX.Element {
+export default function SavesPage(props: {
+  /** 系统保存对话框（导出分享包） */
+  onSaveFile?: (
+    defaultName: string,
+    filters: Array<{ name: string; extensions: string[] }>
+  ) => Promise<string | null>
+  /** 系统打开文件对话框（导入分享包） */
+  onOpenFile?: (filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>
+  /** 已安装版本 id 列表（复制到其他版本） */
+  versions?: string[]
+  /** 打开指定版本实例的「复制到其他版本」对话框 */
+  onCopyToVersion?: (save: SaveInfo, targetVersionId: string) => void
+}): JSX.Element {
   const { push, host } = useToasts()
   const [saves, setSaves] = useState<SaveInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,6 +63,8 @@ export default function SavesPage(): JSX.Element {
   const [query, setQuery] = useState('')
   const [versionFilter, setVersionFilter] = useState('全部')
   const [busy, setBusy] = useState(false)
+  /** 复制到其他版本：选目标版本 */
+  const [copyTarget, setCopyTarget] = useState<string | null>(null)
 
   // 选中/缩略图的键必须带 gameRoot：版本隔离下每个版本都有自己的
   // saves/新世界，只按 folderName 记录会一点选一片（用户实测：点一个亮四个）。
@@ -144,6 +158,74 @@ export default function SavesPage(): JSX.Element {
     })
   }
 
+  /** 导出分享包：把选中的世界压成 zip（对方「导入分享包」即可，无需任何账号）。 */
+  async function exportShare(): Promise<void> {
+    const save = selectedSaves[0]
+    if (save === undefined) return
+    const saveFile = props.onSaveFile
+    if (saveFile === undefined) {
+      push('info', '当前环境没有保存对话框')
+      return
+    }
+    const dest = await saveFile(`${save.folderName}-分享包.zip`, [
+      { name: '世界分享包', extensions: ['zip'] }
+    ])
+    if (dest === null) return
+    setBusy(true)
+    try {
+      const r = await request<{ path: string; sizeBytes: number }>('saves.exportShare', {
+        gameRoot: save.gameRoot,
+        folderName: save.folderName,
+        destPath: dest
+      })
+      push('success', `已导出分享包：${r.path}`)
+    } catch (e) {
+      push('error', `导出失败：${String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 导入分享包：选一个 zip，落到共享 .minecraft 的 saves 下。 */
+  async function importShare(): Promise<void> {
+    const openFile = props.onOpenFile
+    if (openFile === undefined) {
+      push('info', '当前环境没有文件对话框')
+      return
+    }
+    const zip = await openFile([{ name: '世界分享包', extensions: ['zip'] }])
+    if (zip === null) return
+    setBusy(true)
+    try {
+      const r = await request<{ folderName: string }>('saves.importShare', { zipPath: zip })
+      push('success', `已导入世界「${r.folderName}」到共享存档`)
+      await load()
+    } catch (e) {
+      push('error', `导入失败：${String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 复制到其他版本：把选中的世界复制进目标版本的实例目录。 */
+  async function copyToVersion(targetVersionId: string): Promise<void> {
+    const save = selectedSaves[0]
+    if (save === undefined) return
+    setBusy(true)
+    try {
+      const r = await request<{ folderName: string; versionId: string }>('saves.copyToVersion', {
+        gameRoot: save.gameRoot,
+        folderName: save.folderName,
+        targetVersionId
+      })
+      push('success', `已复制到 ${r.versionId}：${r.folderName}`)
+      await load()
+    } catch (e) {
+      push('error', `复制失败：${String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
   const tplBtn = (
     label: string,
     onClick: () => void,
@@ -175,8 +257,9 @@ export default function SavesPage(): JSX.Element {
         {tplBtn('用其他版本启动', () => push('info', '跨版本启动：需选择版本后可用'), {
           disabled: true
         })}
-        {tplBtn('复制到其他版本', () => push('info', '复制存档：内核能力接入后可用'), {
-          disabled: true
+        {tplBtn('复制到其他版本', () => setCopyTarget('__pick__'), {
+          disabled: selectedSaves.length !== 1 || (props.versions ?? []).length === 0,
+          title: '把选中的世界复制到另一个已安装版本'
         })}
         {tplBtn(
           '备份所选世界',
@@ -186,7 +269,10 @@ export default function SavesPage(): JSX.Element {
         {tplBtn('同步到设备…', () => push('info', '设备同步：需登录 Starcloud ID'), {
           disabled: true
         })}
-        {tplBtn('分享', () => push('info', '分享：内核能力接入后可用'), { disabled: true })}
+        {tplBtn('分享', () => void exportShare(), {
+          disabled: selectedSaves.length !== 1,
+          title: '导出为世界分享包（zip），对方导入即可'
+        })}
         <div style={{ width: 1, height: 24, background: 'var(--stroke-divider)' }} />
         <input
           className="input"
@@ -202,9 +288,7 @@ export default function SavesPage(): JSX.Element {
           onChange={setVersionFilter}
         />
         <div style={{ flex: 1 }} />
-        {tplBtn('导入分享包', () => push('info', '导入分享包：内核能力接入后可用'), {
-          disabled: true
-        })}
+        {tplBtn('导入分享包', () => void importShare(), { disabled: false })}
         {tplBtn('打开存档目录', () => void openFolder())}
         <button className="btn btn-subtle" onClick={() => void load()} disabled={loading}>
           <IconRefresh size={15} />
@@ -270,6 +354,46 @@ export default function SavesPage(): JSX.Element {
           })}
         </div>
       </div>
+
+      {/* 复制到其他版本：选目标版本 */}
+      <Modal
+        open={copyTarget !== null}
+        title="复制到其他版本"
+        onClose={() => setCopyTarget(null)}
+        width={440}
+        footer={
+          <>
+            <button className="btn" onClick={() => setCopyTarget(null)}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={copyTarget === null || copyTarget === '__pick__'}
+              onClick={() => {
+                const target = copyTarget
+                setCopyTarget(null)
+                if (target !== null && target !== '__pick__') void copyToVersion(target)
+              }}
+            >
+              复制
+            </button>
+          </>
+        }
+      >
+        <div className="t-cap" style={{ marginBottom: 8 }}>
+          跨版本复制会新建一份「来自 xxx」的世界副本，原世界不受影响。
+        </div>
+        <Select
+          width={undefined}
+          value={copyTarget !== null && copyTarget !== '__pick__' ? copyTarget : ''}
+          options={[
+            { value: '', label: '选择目标版本…' },
+            ...(props.versions ?? []).map((v) => ({ value: v, label: v }))
+          ]}
+          onChange={setCopyTarget}
+        />
+      </Modal>
 
       {host}
     </div>

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { request } from '../bridge'
-import type { SettingsSnapshot } from '../bridge'
+import type { SettingsSnapshot, UpdateInfo } from '../bridge'
 import type { ThemeController, ThemeMode } from '../theme'
 import { InfoBar, Segmented, Select, SkeletonList, Toggle, useToasts } from '../ui'
 import { applyVisualSettings } from '../visualSettings'
@@ -14,6 +14,7 @@ import {
   IconFolder,
   IconHome,
   IconImport,
+  IconInfo,
   IconLink,
   IconPlus,
   IconRefresh,
@@ -143,7 +144,22 @@ const EMPTY: SettingsSnapshot = {
   updateManifestUrl: ''
 }
 
-export default function SettingsPage(props: { theme: ThemeController }): JSX.Element {
+export default function SettingsPage(props: {
+  theme: ThemeController
+  /** 跳到账户页登录 Starcloud ID（跨设备设置里的「去登录」） */
+  onGoLogin?: () => void
+  /** 打开外链（更新下载页） */
+  onOpenExternal?: (url: string) => void
+  /** 系统保存对话框（导出分享包） */
+  onSaveFile?: (
+    defaultName: string,
+    filters: Array<{ name: string; extensions: string[] }>
+  ) => Promise<string | null>
+  /** 系统打开文件对话框（导入分享包） */
+  onOpenFile?: (filters: Array<{ name: string; extensions: string[] }>) => Promise<string | null>
+  /** 已安装版本 id 列表（复制存档到其他版本） */
+  versions?: string[]
+}): JSX.Element {
   const { push, host } = useToasts()
   const [section, setSection] = useState<Section>('game')
   const [loading, setLoading] = useState(true)
@@ -151,6 +167,9 @@ export default function SettingsPage(props: { theme: ThemeController }): JSX.Ele
   const [s, setS] = useState<SettingsSnapshot>(EMPTY)
   const [jvmArgsText, setJvmArgsText] = useState('')
   const [javaProbe, setJavaProbe] = useState('')
+  const [clearingCache, setClearingCache] = useState(false)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -162,6 +181,25 @@ export default function SettingsPage(props: { theme: ThemeController }): JSX.Ele
       push('error', `读取设置失败：${String(e)}`)
     }
     setLoading(false)
+  }, [push])
+
+  /** 检查更新：拉服务端清单，比对当前版本。 */
+  const checkUpdate = useCallback(async (): Promise<void> => {
+    setCheckingUpdate(true)
+    setUpdateInfo(null)
+    try {
+      const info = await request<UpdateInfo>('settings.checkUpdate')
+      setUpdateInfo(info)
+      if (info.hasUpdate) {
+        push('info', `发现新版本 V${info.version}（当前 V${info.current}）`)
+      } else {
+        push('success', '当前已是最新版本')
+      }
+    } catch (e) {
+      push('error', `检查更新失败：${String(e)}`)
+    } finally {
+      setCheckingUpdate(false)
+    }
   }, [push])
 
   useEffect(() => {
@@ -592,9 +630,16 @@ export default function SettingsPage(props: { theme: ThemeController }): JSX.Ele
                 </Field>
                 <button
                   className="btn"
-                  onClick={() => push('info', '清空缓存：内核能力接入后可用')}
+                  disabled={clearingCache}
+                  onClick={() => {
+                    setClearingCache(true)
+                    void request('settings.clearCache')
+                      .then(() => push('success', '资源缓存已清空'))
+                      .catch((e) => push('error', String(e)))
+                      .finally(() => setClearingCache(false))
+                  }}
                 >
-                  清空缓存
+                  {clearingCache ? '清空中…' : '清空缓存'}
                 </button>
               </div>
             </>
@@ -756,9 +801,38 @@ export default function SettingsPage(props: { theme: ThemeController }): JSX.Ele
                     label="自动检查更新"
                   />
                 </Field>
-                <button className="btn" onClick={() => push('info', '检查更新：内核能力接入后可用')}>
-                  检查更新
+                <button className="btn" disabled={checkingUpdate} onClick={() => void checkUpdate()}>
+                  {checkingUpdate ? '检查中…' : '检查更新'}
                 </button>
+                {updateInfo !== null && (
+                  <div className="info info-info" style={{ marginTop: 10, width: '100%' }}>
+                    <IconInfo size={14} />
+                    <div className="info-body">
+                      {updateInfo.hasUpdate ? (
+                        <>
+                          <div className="t-strong">发现新版本 V{updateInfo.version}</div>
+                          {updateInfo.notes !== undefined && updateInfo.notes !== '' && (
+                            <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                              {updateInfo.notes}
+                            </div>
+                          )}
+                          {updateInfo.capability === 'ManualDownload' &&
+                            updateInfo.downloadUrl !== undefined && (
+                              <button
+                                className="btn btn-sm"
+                                style={{ marginTop: 8 }}
+                                onClick={() => props.onOpenExternal?.(updateInfo.downloadUrl!)}
+                              >
+                                打开下载页
+                              </button>
+                            )}
+                        </>
+                      ) : (
+                        <div>当前已是最新版本（V{updateInfo.current}）</div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -804,7 +878,7 @@ export default function SettingsPage(props: { theme: ThemeController }): JSX.Ele
                 <div style={{ marginTop: 10 }}>
                   <button
                     className="btn btn-primary"
-                    onClick={() => push('info', 'Starcloud ID 登录：内核能力接入后可用')}
+                    onClick={() => props.onGoLogin?.()}
                   >
                     去登录
                   </button>
