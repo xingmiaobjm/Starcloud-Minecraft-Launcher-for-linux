@@ -23,7 +23,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import * as readline from 'node:readline'
 import * as path from 'node:path'
 
-const LAUNCHER_VERSION = '0.3.8-beta.5'
+const LAUNCHER_VERSION = '0.3.8-beta.6'
 const isDev = !app.isPackaged
 
 // ── C# 桥接进程 ───────────────────────────────────────────────────────────
