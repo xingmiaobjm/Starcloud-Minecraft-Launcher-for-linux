@@ -117,7 +117,17 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
       case 'projections':
         return <ProjectionsPage />
       case 'running':
-        return <RunningPage session={session} onGoHome={() => setPage('home')} />
+        return (
+          <RunningPage
+            onGoHome={() => setPage('home')}
+            onOpenLogs={() => setPage('logs')}
+            onRestart={(id) => {
+              // Win 同款：结束进程后回首页，用同一版本重新启动
+              session.setVersion(id)
+              setPage('home')
+            }}
+          />
+        )
       case 'accounts':
         return <AccountsPage />
       case 'plugins':

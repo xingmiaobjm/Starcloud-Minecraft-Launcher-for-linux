@@ -246,6 +246,70 @@ export interface ProjectionPreview {
   unsupported?: string
 }
 
+// ── 运行状态（runtime.*，对齐 Win GameRuntimeMonitor） ──────────────────────
+
+export interface RuntimeSample {
+  at: string
+  cpuPercent: number
+  workingSetBytes: number
+  gpuPercent?: number
+}
+
+export interface RuntimeInstance {
+  pid: number
+  versionId: string
+  startedAt: string
+  uptimeSec: number
+  recovered: boolean
+  cpuPercent: number
+  workingSetBytes: number
+  peakWorkingSetBytes: number
+  threadCount: number
+  gpuPercent?: number
+}
+
+/** 启动上下文（GameLaunchContext，JSON 契约是 snake_case） */
+export interface LaunchContext {
+  version_id: string
+  java_path: string
+  max_memory_mb: number
+  min_memory_mb: number
+  window_width: number
+  window_height: number
+  fullscreen: boolean
+  extra_jvm_args: string[]
+  isolation: string
+  mod_count: number
+  shader_pack_count: number
+  resource_pack_count: number
+  captured_at: string
+}
+
+export interface RuntimeState {
+  selectedPid: number
+  samplingPaused: boolean
+  collectGpu: boolean
+  intervalMs: number
+  commandLine?: string
+  /** 上下文是缺失后按当前配置重算的（上一轮启动器拉起的会话） */
+  contextFallback: boolean
+  context?: LaunchContext
+  instances: RuntimeInstance[]
+  samples: RuntimeSample[]
+}
+
+export interface DiagIssue {
+  versionId: string
+  kind: string
+  detail: string
+  autoFixable: boolean
+}
+
+export interface DiagReport {
+  scannedCount: number
+  issues: DiagIssue[]
+}
+
 export interface NovaConfig {
   baseUrl: string
   apiKey: string
@@ -941,6 +1005,67 @@ function mockOf(method: string, p: Record<string, unknown>): unknown {
       return { files: [{ name: 'tower.litematic', sizeBytes: 2048, downloadUrl: 'https://example.com/tower.litematic' }] }
     case 'lab.communityDownload':
       return { ok: true, path: '/tmp/schematics/tower.litematic' }
+    case 'runtime.state': {
+      const started = MOCK_NOW - 42 * 60_000
+      const inst = {
+        pid: 4242,
+        versionId: '1.20.4',
+        startedAt: new Date(started).toISOString(),
+        uptimeSec: 2520,
+        recovered: false,
+        cpuPercent: 42.8,
+        workingSetBytes: 688 * 1024 * 1024,
+        peakWorkingSetBytes: 720 * 1024 * 1024,
+        threadCount: 36,
+        gpuPercent: undefined as number | undefined
+      }
+      return {
+        selectedPid: 4242,
+        samplingPaused: false,
+        collectGpu: true,
+        intervalMs: 1000,
+        commandLine: 'C:\Java\bin\java.exe -Xmx4096M -jar client.jar',
+        contextFallback: false,
+        context: {
+          version_id: '1.20.4',
+          java_path: '',
+          max_memory_mb: 4096,
+          min_memory_mb: 512,
+          window_width: 854,
+          window_height: 480,
+          fullscreen: false,
+          extra_jvm_args: [],
+          isolation: 'isolated',
+          mod_count: 0,
+          shader_pack_count: 0,
+          resource_pack_count: 0,
+          captured_at: new Date(started).toISOString()
+        },
+        instances: [inst],
+        samples: Array.from({ length: 30 }, (_, i) => ({
+          at: new Date(started + i * 60_000).toISOString(),
+          cpuPercent: 30 + Math.sin(i / 3) * 10 + i * 0.2,
+          workingSetBytes: (500 + i * 6) * 1024 * 1024,
+          gpuPercent: undefined
+        }))
+      }
+    }
+    case 'runtime.logs':
+      return {
+        lines: [
+          '[OUT] [12:17:08] [Datafixer Bootstrap #0/INFO]: 307 Datafixer optimizations took 1955 milliseconds',
+          '[OUT] [12:17:14] [Render thread/INFO]: Setting user: Steve',
+          '[OUT] [12:17:14] [Render thread/INFO]: Backend library: LWJGL version 3.4.3+4'
+        ]
+      }
+    case 'runtime.diagnose':
+      return { scannedCount: 6, issues: [] }
+    case 'runtime.select':
+    case 'runtime.interval':
+    case 'runtime.gpu':
+      return mockOf('runtime.state', {})
+    case 'runtime.kill':
+      return { ok: true }
     case 'lab.worldEater':
       return { ok: true, path: 'world-eater.litematic' }
     case 'nova.config.get':
