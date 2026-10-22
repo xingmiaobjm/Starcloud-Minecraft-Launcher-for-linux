@@ -3,11 +3,11 @@
 ## 0.3.8-beta.6
 
 ### 修复
-- **Linux 联机核心装不上**：安装器把可执行文件名写死为 ，
-  而 Linux/macOS 包内是无扩展名的 ，核心永远装不上。
+- **Linux 联机核心装不上**：安装器把可执行文件名写死为 `terracotta.exe`，
+  而 Linux/macOS 包内是无扩展名的 `terracotta-<版本>-<平台>-<架构>`，核心永远装不上。
   改为平台感知（非 Windows 去扩展名匹配、排除 .so/.dll/.dylib/.json）并补执行位。
 
-  实测：WSL 客户端安装核心成功，跨机进房可推进到 。
+  实测：WSL 客户端安装核心成功，跨机进房可推进到 `guestEntering`。
 
 ## 0.3.8-beta.5
 
