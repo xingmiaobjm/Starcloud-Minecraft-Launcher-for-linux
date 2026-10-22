@@ -971,49 +971,6 @@ function mockOf(method: string, p: Record<string, unknown>): unknown {
       }
     case 'lab.colorText':
       return { ok: true, text: '§x§f§f§d§3§2§2' + String(p.text ?? '') }
-    case 'lab.commands':
-      return {
-        categories: ['物品', '移动'],
-        templates: [
-          {
-            id: 'give', category: '物品', name: '给予物品',
-            template: 'give {target} {item} {count}',
-            note: 'NBT 写在物品 ID 后面',
-            params: [
-              { key: 'target', label: '目标', defaultValue: '@s', suggestions: '@s,@p,@a', required: true },
-              { key: 'item', label: '物品 ID', defaultValue: 'minecraft:diamond', suggestions: 'minecraft:diamond,minecraft:stone', required: true },
-              { key: 'count', label: '数量', defaultValue: '1', suggestions: '1,16,64', required: false }
-            ]
-          },
-          {
-            id: 'tp', category: '移动', name: '传送', template: 'tp {target} {x} {y} {z}', note: '',
-            params: [
-              { key: 'target', label: '目标', defaultValue: '@s', suggestions: '@s,@p,@a', required: true },
-              { key: 'x', label: 'X', defaultValue: '0', suggestions: '', required: false },
-              { key: 'y', label: 'Y', defaultValue: '64', suggestions: '', required: false },
-              { key: 'z', label: 'Z', defaultValue: '0', suggestions: '', required: false }
-            ]
-          }
-        ]
-      }
-    case 'lab.buildCommand': {
-      const tpl = ({ give: 'give {target} {item} {count}', tp: 'tp {target} {x} {y} {z}' } as Record<string, string>)[String(p.templateId)] ?? 'say hi'
-      const values = (p.values ?? {}) as Record<string, string>
-      return { ok: true, command: tpl.replace(/{(w+)}/g, (m, k) => values[k] ?? m), hasUnfilled: false, error: undefined }
-    }
-    case 'lab.communitySearch':
-      return {
-        items: ['Litematica 建筑合集', '红石机器投影包'].map((name, i) => ({
-          source: 'GitHub', name, author: 'demo-user', description: '一组成品投影，包含建筑与机器。',
-          stars: 128 - i * 30, updatedAt: ago(i * 24), fullName: 'demo/repo' + i,
-          htmlUrl: 'https://github.com/demo/repo' + i, imageUrl: ''
-        })),
-        failedSources: [], sources: ['GitHub']
-      }
-    case 'lab.communityFiles':
-      return { files: [{ name: 'tower.litematic', sizeBytes: 2048, downloadUrl: 'https://example.com/tower.litematic' }] }
-    case 'lab.communityDownload':
-      return { ok: true, path: '/tmp/schematics/tower.litematic' }
     case 'runtime.state': {
       const started = MOCK_NOW - 42 * 60_000
       const inst = {

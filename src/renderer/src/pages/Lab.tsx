@@ -8,9 +8,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { request, nativeApi } from '../bridge'
 import type { ProjectionPreview } from '../bridge'
 import ProjectionViewer from '../projectionViewer'
-import { ColorTextTool, CommandTool, CommunityTool } from './labTools'
+import { ColorTextTool } from './labTools'
 import { EmptyState, PageShell, SkeletonList, useToasts } from '../ui'
-import { IconList, IconSettings, IconWorld, IconImport, IconClose, IconWarning, IconRefresh } from '../icons'
+import { IconList, IconSettings, IconClose, IconWarning, IconRefresh } from '../icons'
 
 /** 统计列表最多展示这么多条（桥接侧本身也只给 60 条）。 */
 const MAX_STATS_ROWS = 30
@@ -264,9 +264,7 @@ export default function LabPage() {
           <div className="card" style={{ width: 220, flexShrink: 0, padding: 8, alignSelf: 'flex-start' }}>
             {[
               { id: 'workshop', label: '投影工坊', icon: <IconList size={15} /> },
-              { id: 'color', label: '彩色文字', icon: <IconSettings size={15} /> },
-              { id: 'community', label: '投影社区', icon: <IconWorld size={15} /> },
-              { id: 'command', label: '指令助手', icon: <IconImport size={15} /> }
+              { id: 'color', label: '彩色文字', icon: <IconSettings size={15} /> }
             ].map((t) => (
               <button
                 key={t.id}
@@ -286,7 +284,7 @@ export default function LabPage() {
 
           {section !== 'workshop' && (
             <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              {section === 'color' ? <ColorTextTool /> : section === 'community' ? <CommunityTool /> : <CommandTool />}
+              {section === 'color' && <ColorTextTool />}
             </div>
           )}
 
