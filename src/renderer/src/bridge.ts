@@ -830,6 +830,15 @@ function mockOf(method: string, p: Record<string, unknown>): unknown {
           })
         )
       }
+    case 'content.translate':
+      return {
+        original: String(p.query ?? ''),
+        effective: /[一-鿿]/.test(String(p.query ?? '')) ? 'Sodium' : String(p.query ?? ''),
+        translated: /[一-鿿]/.test(String(p.query ?? '')),
+        source: '内置词典'
+      }
+    case 'content.installModpack':
+      return { ok: true, targetId: '示例整合包', renamed: false, isolated: true, summary: '已联动安装 Minecraft 1.20.4' }
     case 'content.install':
       return {
         installed: [

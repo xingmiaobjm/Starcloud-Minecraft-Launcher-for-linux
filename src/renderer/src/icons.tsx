@@ -260,3 +260,14 @@ export function IconTheme(props: IconProps & { mode: 'system' | 'light' | 'dark'
     </Svg>
   )
 }
+
+/** 下载（箭头落入托盘）。 */
+export function IconDownload(props: IconProps): JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M12 4v10" />
+      <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+      <path d="M5 19h14" />
+    </Svg>
+  )
+}

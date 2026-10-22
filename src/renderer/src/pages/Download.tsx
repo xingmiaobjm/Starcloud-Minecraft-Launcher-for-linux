@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { onBridgeEvent, request } from '../bridge'
 import type { RemoteVersion, VersionCatalog } from '../bridge'
 import { EmptyState, ProgressBar, SkeletonList, useToasts } from '../ui'
+import CommunityPanel from './downloadCommunity'
 
 import grassIcon from '../assets/mc-icons/natural_grass_block.png'
 import amethystIcon from '../assets/mc-icons/block_of_amethyst.png'
@@ -189,12 +190,7 @@ export default function DownloadPage(): JSX.Element {
               <button
                 className={`nav-item${section === item.id ? ' nav-active' : ''}`}
                 style={{ height: 38, width: '100%' }}
-                onClick={() => {
-                  setSection(item.id)
-                  if (item.id !== 'vanilla') {
-                    push('info', `${item.label}：内容检索接入后可用`)
-                  }
-                }}
+                onClick={() => setSection(item.id)}
               >
                 <span className="nav-icon" style={{ fontFamily: 'inherit', fontSize: 14 }}>
                   {item.icon}
@@ -206,7 +202,14 @@ export default function DownloadPage(): JSX.Element {
         </div>
 
         {/* 右侧内容 */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: section === 'vanilla' ? 'flex' : 'none',
+            flexDirection: 'column'
+          }}
+        >
           {/* 顶部：分段 + 搜索 + 缓存 */}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
             <div className="seg" style={{ width: 330, gridTemplateColumns: 'repeat(3, 1fr)' }}>
@@ -365,6 +368,7 @@ export default function DownloadPage(): JSX.Element {
             </div>
           </div>
         </div>
+        {section !== 'vanilla' && <CommunityPanel kind={section} />}
       </div>
       {host}
     </div>
