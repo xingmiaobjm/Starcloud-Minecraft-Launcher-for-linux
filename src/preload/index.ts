@@ -68,7 +68,28 @@ const native = {
     ipcRenderer.invoke('dialog:pickSaveFile', title, defaultName, filters ?? [])
 }
 
+const appEvents = {
+  /** 主进程推送的界面导航指令（浮窗点击 → 打开 Nova 对话） */
+  onNavigate: (handler: (target: string) => void): void => {
+    ipcRenderer.on('app:navigate', (_e, target: string) => handler(target))
+  }
+}
+
+const overlay = {
+  /** 主进程推送浮窗文案 */
+  onText: (handler: (text: string) => void): void => {
+    ipcRenderer.on('overlay:text', (_e, text: string) => handler(text))
+  },
+  /** 请求主进程显示游戏内浮窗 */
+  showOverlay: (text: string): Promise<unknown> =>
+    ipcRenderer.invoke('nova:overlay', text),
+  /** 浮窗被点击 → 主进程打开 Nova 对话 */
+  clicked: (): void => ipcRenderer.send('overlay:clicked')
+}
+
 contextBridge.exposeInMainWorld('bridge', bridge)
+contextBridge.exposeInMainWorld('overlay', overlay)
+contextBridge.exposeInMainWorld('appEvents', appEvents)
 contextBridge.exposeInMainWorld('bridgeEvents', bridgeEvents)
 contextBridge.exposeInMainWorld('theme', theme)
 contextBridge.exposeInMainWorld('win', win)

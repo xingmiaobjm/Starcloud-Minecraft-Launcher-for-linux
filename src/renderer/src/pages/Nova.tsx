@@ -3,7 +3,7 @@
 /// 对话按 Win 端的交互放在独立浮层里，由「打开 Nova 对话」按钮唤起。
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { onBridgeEvent, request } from '../bridge'
+import { nativeApi, onBridgeEvent, request } from '../bridge'
 import type { NovaConfig, NovaPlanItem } from '../bridge'
 import { Modal, Toggle, useToasts } from '../ui'
 import { IconSparkle } from '../icons'
@@ -54,6 +54,7 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
   const [useCloud, setUseCloud] = useState(false)
   const [session, setSession] = useState<{ loggedIn: boolean; displayName?: string; userId?: string } | null>(null)
   const signedIn = session?.loggedIn === true
+  /** 游戏内浮窗开关（落盘到 novaOverlayEnabled） */
   const [overlay, setOverlay] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [plan, setPlan] = useState<PlanState | null>(null)
@@ -88,7 +89,32 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
     void request<{ loggedIn: boolean; displayName?: string; userId?: string }>('starcloud.state')
       .then((s) => setSession(s))
       .catch(() => setSession(null))
+    // 浮窗开关：与设置页共用同一份（内核 novaOverlayEnabled）
+    void request<{ novaOverlayEnabled?: boolean }>('settings.get')
+      .then((snap) => setOverlay(snap.novaOverlayEnabled === true))
+      .catch(() => undefined)
   }, [loadConfig])
+
+  /** 游戏运行时弹一下游戏内浮窗（Win 同款：只在游戏跑着时提示）。 */
+  useEffect(() => {
+    const onOutput = (event: string, params: Record<string, unknown>): void => {
+      if (event !== 'game.output') return
+      const api = nativeApi()
+      if (api === null) return
+      void api.showOverlay('Nova 有一条新消息，点开查看').catch(() => undefined)
+    }
+    onBridgeEvent(onOutput)
+  }, [])
+  /** 写回浮窗开关（落盘 novaOverlayEnabled）。 */
+  const applyOverlay = useCallback(
+    (enabled: boolean): void => {
+      setOverlay(enabled)
+      void request('settings.apply', { novaOverlayEnabled: enabled })
+        .then(() => push('success', enabled ? '已开启游戏内浮窗' : '已关闭游戏内浮窗'))
+        .catch((e) => push('error', `保存失败：${String(e)}`))
+    },
+    [push]
+  )
 
   // 可用通道：自接模型，或已登录且开了云端中转（Starcloud ID 下发的 Key）
   const configured =
@@ -333,10 +359,7 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
           </div>
           <Toggle
             checked={overlay}
-            onChange={(v) => {
-              setOverlay(v)
-              if (v) push('info', '游戏内浮窗：内核能力接入后可用')
-            }}
+            onChange={(v) => applyOverlay(v)}
             label="游戏内辅助浮窗"
           />
         </SectionCard>

@@ -1373,3 +1373,38 @@ input[type='range']::-moz-range-thumb {
   justify-content: center;
   min-height: 142px;
 }
+
+/* ═══ Nova 游戏内浮窗（透明置顶小窗，Win 端 NovaOverlayWindow 等价） ═══ */
+.overlay-body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--font-ui);
+}
+.nova-overlay {
+  margin: 0;
+  padding: 12px 14px;
+  height: 100%;
+  border-radius: var(--r-overlay);
+  background: var(--surface-card);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-16);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: fadeIn 180ms cubic-bezier(0.33, 0, 0.67, 1) both;
+}
+.nova-overlay-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.nova-overlay-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}

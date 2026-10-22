@@ -18,6 +18,7 @@
 /// 5. **root 用户 / 容器无沙箱**：Chromium 沙箱不可用，需显式 `--no-sandbox`
 ///    （由 ELECTRON_DISABLE_SANDBOX=1 环境变量控制）。
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
+import { hideOverlay, overlayClicked, setOverlayOpenHandler, showOverlay } from './overlay'
 import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import * as readline from 'node:readline'
@@ -286,6 +287,12 @@ function registerIpc(): void {
     bridgeRequest(method, params)
   )
   ipcMain.handle('app:version', () => LAUNCHER_VERSION)
+  // Nova 游戏内浮窗：渲染层请求显示一句提示（游戏运行中）
+  ipcMain.handle('nova:overlay', (_e, text: unknown) => {
+    if (typeof text === 'string' && text.trim() !== '') showOverlay(text.trim())
+    return { ok: true }
+  })
+  ipcMain.on('overlay:clicked', () => overlayClicked())
 
   // ── 渲染层没有文件系统：本地图片读成 data URL 回传 ──
   // 不放开 file:// CSP（那等于把整个磁盘挂到页面上），只在受控的 IPC 上做。
@@ -370,6 +377,16 @@ function registerIpc(): void {
       return result.filePath
     }
   )
+
+  // 浮窗点击：主窗口跳到 Nova 对话
+  setOverlayOpenHandler(() => {
+    if (mainWindow !== null) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+      mainWindow.webContents.send('app:navigate', 'nova')
+    }
+  })
 
   // 渲染层定好主题后回传窗口底色，避免缩放时露出另一套主题的底
   ipcMain.on('theme:set-background', (_e, dark: boolean) => {

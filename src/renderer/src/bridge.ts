@@ -401,6 +401,10 @@ declare global {
     }
     /** 主进程直连能力（皮肤缩略图 / 系统浏览器），浏览器调试模式下不存在。 */
     native?: NativeApi
+    /** 主进程推送的界面导航指令 */
+    appEvents?: {
+      onNavigate: (handler: (target: string) => void) => void
+    }
   }
 }
 
@@ -415,6 +419,8 @@ export interface NativeApi {
     title: string,
     filters?: Array<{ name: string; extensions: string[] }>
   ) => Promise<string | null>
+  /** 请求主进程显示 Nova 游戏内浮窗。 */
+  showOverlay: (text: string) => Promise<unknown>
   /** 系统保存对话框（整合包导出）；返回 null 表示用户取消。 */
   pickSaveFile: (
     title: string,

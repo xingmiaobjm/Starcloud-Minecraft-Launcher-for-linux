@@ -47,6 +47,15 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
   useEffect(() => {
     void loadAndApplyVisualSettings()
   }, [])
+
+  // 主进程让浮窗点击后跳到 Nova 对话
+  useEffect(() => {
+    const onNavigate = (target: unknown): void => {
+      if (typeof target === 'string') setPage(target as PageKey)
+    }
+    window.appEvents?.onNavigate(onNavigate)
+    return () => undefined
+  }, [])
   const [appVersion, setAppVersion] = useState('')
 
   useEffect(() => {
