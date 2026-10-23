@@ -118,6 +118,10 @@
   --stroke-strong: rgba(0, 0, 0, 0.16);
   --stroke-divider: rgba(0, 0, 0, 0.08);
 
+  /* 滚动条 thumb（WinUI ScrollBarThumbFill：黑 40%，hover 提到 60%） */
+  --scroll-thumb: rgba(0, 0, 0, 0.4);
+  --scroll-thumb-hover: rgba(0, 0, 0, 0.6);
+
   --text-primary: rgba(0, 0, 0, 0.8956);
   --text-secondary: rgba(0, 0, 0, 0.6063);
   --text-tertiary: rgba(0, 0, 0, 0.4458);
@@ -163,6 +167,10 @@
   --stroke-default: rgba(255, 255, 255, 0.0838);
   --stroke-strong: rgba(255, 255, 255, 0.13);
   --stroke-divider: rgba(255, 255, 255, 0.0838);
+
+  /* 滚动条 thumb（WinUI ScrollBarThumbFill：白 40%，hover 提到 60%） */
+  --scroll-thumb: rgba(255, 255, 255, 0.4);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.6);
 
   --text-primary: #ffffff;
   --text-secondary: rgba(255, 255, 255, 0.786);
@@ -1088,18 +1096,20 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
   color: var(--text-secondary);
 }
 
-/* ═══ 滚动条（约束 4） ═══ */
+/* ═══ 滚动条（约束 4） ═══
+   注意：不能设 scrollbar-width / scrollbar-color 标准属性——
+   Chromium 121+ 里它们会把 ::-webkit-scrollbar 自定义样式整体顶掉，
+   画成一条亮白粗条（截图里那条刺眼白块就是它）。 */
 ::-webkit-scrollbar { width: 12px; height: 12px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: var(--stroke-strong);
+  background: var(--scroll-thumb);
   border-radius: var(--r-pill);
   border: 4px solid transparent;
   background-clip: content-box;
 }
-::-webkit-scrollbar-thumb:hover { background-color: var(--text-disabled); }
+::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
 ::-webkit-scrollbar-corner { background: transparent; }
-* { scrollbar-width: thin; scrollbar-color: var(--stroke-strong) transparent; }
 
 /* ═══ 文本工具 ═══ */
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

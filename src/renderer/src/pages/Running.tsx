@@ -287,7 +287,16 @@ export default function RunningPage(props: {
       ) : current === null ? (
         <div className="card" style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div className="empty" style={{ minHeight: 0 }}>
-            <div style={{ fontSize: 26, opacity: 0.5, lineHeight: 1 }}>☰</div>
+            <div
+              style={{
+                fontFamily: 'var(--font-icon)',
+                fontSize: 40,
+                color: 'var(--text-tertiary)',
+                lineHeight: 1
+              }}
+            >
+              {String.fromCharCode(0xec3b)}
+            </div>
             <div className="empty-title" style={{ fontSize: 16 }}>现在没有游戏在运行</div>
             <div className="empty-hint">去首页启动一个版本</div>
             <button className="btn btn-primary" onClick={props.onGoHome}>去首页</button>

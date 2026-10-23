@@ -119,6 +119,9 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
   // 可用通道：自接模型，或已登录且开了云端中转（Starcloud ID 下发的 Key）
   const configured =
     (config.baseUrl.length > 0 && config.model.length > 0) || (signedIn && useCloud)
+  // 本地没配完整、走的是云端通道时，「当前使用」卡片显示云端而非空模型名
+  const useCloudChannel =
+    signedIn && useCloud && !(config.baseUrl.length > 0 && config.model.length > 0)
 
   async function saveConfig(): Promise<void> {
     try {
@@ -304,11 +307,15 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="t-strong truncate">{config.model}</span>
+                  <span className="t-strong truncate">
+                    {useCloudChannel ? '云端模型（Starcloud ID）' : config.model}
+                  </span>
                   <span className="chip chip-accent">当前使用</span>
                 </div>
                 <div className="t-meta truncate">
-                  {config.baseUrl} · Key {config.apiKey === '' ? '未设置' : config.apiKey.slice(0, 8) + '…'}
+                  {useCloudChannel
+                    ? '由账号下发的云端通道，无需本机 Key'
+                    : `${config.baseUrl} · Key ${config.apiKey === '' ? '未设置' : config.apiKey.slice(0, 8) + '…'}`}
                 </div>
               </div>
             </div>
