@@ -1083,6 +1083,42 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
   animation: slideUp var(--t-exit) var(--e-enter) both;
 }
 
+/* Nova 顶栏弹出面板（Win 端 NovaPopup：顶栏下 8px、右对齐 440px、限高到窗口底） */
+.popup-scrim {
+  /* 透明轻触关闭层：面板外任何点击都收面板（WinUI IsLightDismissEnabled） */
+  position: fixed;
+  inset: 0;
+  z-index: 890;
+  background: transparent;
+}
+.nova-flyout {
+  position: fixed;
+  top: 56px; /* 顶栏 48 + 8 */
+  right: 12px;
+  z-index: 895;
+  width: 440px;
+  max-height: calc(100vh - 68px);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--surface-window);
+  border: 1px solid var(--stroke-default);
+  box-shadow: var(--shadow-flyout);
+  -webkit-app-region: no-drag;
+  animation: novaPanelIn var(--t-exit) var(--e-enter) both;
+}
+@keyframes novaPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* ═══ 日志 ═══ */
 .log {
   flex: 1;
@@ -1199,7 +1235,8 @@ input[type='range']::-moz-range-thumb {
 [data-bg='builtin'] .bg-layer {
   background-image: linear-gradient(160deg, #2a3442 0%, #3a2f22 55%, #1f2430 100%);
 }
-.win > *:not(.bg-layer) { position: relative; z-index: 1; }
+/* fixed 弹层（Nova 顶栏面板 + 轻触关闭层）不走这条，否则 fixed 被降级成 relative */
+.win > *:not(.bg-layer):not(.popup-scrim):not(.nova-flyout) { position: relative; z-index: 1; }
 
 /* ═══ 动效档位（设置 → 通用 → 性能与动效） ═══════════════════════════
    minimal 档 = data-motion="off"：把所有动画/过渡压到近零，保留最终状态。 */
