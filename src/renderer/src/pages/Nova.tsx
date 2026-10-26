@@ -1,12 +1,13 @@
 /// Nova 页：对齐 Win 端 NovaPage —— 这是**模型设置页**，不是聊天页。
 /// 卡片顺序：Nova 账户 → 云端模型 → 模型设置 → 游戏内辅助浮窗。
-/// 对话按 Win 端的交互放在独立浮层里，由「打开 Nova 对话」按钮唤起。
-import { useCallback, useEffect, useRef, useState } from 'react'
+/// 对话在共用面板 NovaChatPanel 里：页内 Modal 与标题栏 Orb 弹层走同一份。
+import { useCallback, useEffect, useState } from 'react'
 
 import { nativeApi, onBridgeEvent, request } from '../bridge'
-import type { NovaConfig, NovaPlanItem } from '../bridge'
+import type { NovaConfig } from '../bridge'
 import { Modal, Toggle, useToasts } from '../ui'
 import { IconSparkle } from '../icons'
+import NovaChatPanel from '../NovaChatPanel'
 
 /** 分组卡标题（黄色竖条 + 标题 + 右侧附加操作）。 */
 function SectionCard(props: {
@@ -31,22 +32,7 @@ function SectionCard(props: {
   )
 }
 
-/** 最近一条带 plan 的消息 id（只有它能执行/放弃）。 */
-interface PlanState {
-  planId: string
-  items: NovaPlanItem[]
-  title?: string
-}
-
-interface ChatMessage {
-  id: number
-  role: 'user' | 'assistant'
-  content: string
-  tool?: string
-  streaming?: boolean
-  plan?: NovaPlanItem[]
-}
-
+/** 最近一条带 plan 的消息在共用面板内部管理；页面只管配置与入口。 */
 export default function NovaPage(props: { seed?: string; onGoLogin?: () => void }): JSX.Element {
   const { push, host } = useToasts()
   const [config, setConfig] = useState<NovaConfig>({ baseUrl: '', apiKey: '', model: '' })
@@ -57,21 +43,6 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
   /** 游戏内浮窗开关（落盘到 novaOverlayEnabled） */
   const [overlay, setOverlay] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
-  const [plan, setPlan] = useState<PlanState | null>(null)
-  const [planBusy, setPlanBusy] = useState(false)
-
-  // 对话状态
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [input, setInput] = useState('')
-  const [busy, setBusy] = useState(false)
-  const seq = useRef(1)
-  const streamingId = useRef<number | null>(null)
-  const bodyRef = useRef<HTMLDivElement | null>(null)
-
-  // 「问 Nova」等入口带来的预填文本（Win 端 NovaRuntime.RequestInput 的等价物）
-  useEffect(() => {
-    if (props.seed !== undefined && props.seed !== '') setInput(props.seed)
-  }, [props.seed])
 
   const loadConfig = useCallback(async (): Promise<void> => {
     try {
@@ -135,88 +106,6 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
       push(ok ? 'success' : 'info', ok ? '模型配置已保存。' : '已清除模型配置。')
     } catch (e) {
       push('error', String(e))
-    }
-  }
-
-  // 流式事件（nova.chat 只回 accepted，正文走事件）
-  useEffect(() => {
-    onBridgeEvent((event, params) => {
-      if (event === 'nova.delta') {
-        const text = String(params.text ?? '')
-        if (text === '') return
-        const id = streamingId.current
-        setMessages((prev) =>
-          prev.map((m) => (m.id === id ? { ...m, content: m.content + text, streaming: true } : m))
-        )
-      } else if (event === 'nova.tool') {
-        const tool = String(params.tool ?? '')
-        const id = streamingId.current
-        setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, tool } : m)))
-      } else if (event === 'nova.done') {
-        const text = String(params.text ?? '')
-        const planItems = params.plan as NovaPlanItem[] | undefined
-        if (planItems !== undefined && planItems.length > 0 && params.planId != null) {
-          setPlan({ planId: String(params.planId), items: planItems, title: params.planTitle != null ? String(params.planTitle) : undefined })
-        }
-        const id = streamingId.current
-        streamingId.current = null
-        setBusy(false)
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === id
-              ? { ...m, content: text !== '' ? text : m.content, streaming: false, plan: planItems }
-              : m
-          )
-        )
-      } else if (event === 'nova.failed') {
-        const error = String(params.error ?? '未知错误')
-        const id = streamingId.current
-        streamingId.current = null
-        setBusy(false)
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === id
-              ? { ...m, content: `请求失败：${error}`, streaming: false }
-              : m
-          )
-        )
-      }
-    })
-  }, [])
-
-  useEffect(() => {
-    if (bodyRef.current !== null) {
-      bodyRef.current.scrollTop = bodyRef.current.scrollHeight
-    }
-  }, [messages])
-
-  async function send(): Promise<void> {
-    const text = input.trim()
-    if (text === '' || busy) return
-    if (!configured) {
-      push('info', '先在「模型设置」里填好 Base URL 与模型名，或登录 Starcloud ID 使用云端模型')
-      return
-    }
-    setInput('')
-    setBusy(true)
-    const userId = seq.current++
-    const assistantId = seq.current++
-    streamingId.current = assistantId
-    setMessages((prev) => [
-      ...prev,
-      { id: userId, role: 'user', content: text },
-      { id: assistantId, role: 'assistant', content: '', streaming: true }
-    ])
-    try {
-      await request<{ accepted: boolean }>('nova.chat', { message: text })
-    } catch (e) {
-      streamingId.current = null
-      setBusy(false)
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId ? { ...m, content: `请求失败：${String(e)}`, streaming: false } : m
-        )
-      )
     }
   }
 
@@ -372,112 +261,9 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
         </SectionCard>
       </div>
 
-      {/* Nova 对话浮层 */}
-      <Modal open={chatOpen} title="Nova" onClose={() => setChatOpen(false)} width={720}>
-        <div
-          ref={bodyRef}
-          style={{ maxHeight: '52vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}
-        >
-          {messages.length === 0 && (
-            <div className="t-cap" style={{ padding: '16px 0' }}>
-              {configured
-                ? '问点什么吧：查版本、算配置、写指令都可以。'
-                : '先在「模型设置」里填好 Base URL 与模型名，或登录 Starcloud ID 使用云端模型。'}
-            </div>
-          )}
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              style={{
-                alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                maxWidth: '78%',
-                padding: '8px 12px',
-                borderRadius: 12,
-                background:
-                  m.role === 'user' ? 'var(--accent)' : 'var(--surface-subtle)',
-                color: m.role === 'user' ? 'var(--text-on-accent)' : 'var(--text-primary)',
-                border: m.role === 'user' ? 'none' : '1px solid var(--stroke-subtle)',
-                whiteSpace: 'pre-wrap',
-                fontSize: 13,
-                animation: m.streaming ? 'pulse 1.5s infinite' : undefined
-              }}
-            >
-              {m.tool !== undefined && (
-                <div className="t-meta" style={{ marginBottom: 4, opacity: 0.8 }}>
-                  正在调用：{m.tool}
-                </div>
-              )}
-              {m.content}
-              {m.plan !== undefined && m.plan.length > 0 && (
-                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {m.plan.map((p) => (
-                    <div
-                      key={p.title}
-                      className="t-meta"
-                      style={{ padding: '6px 8px', borderRadius: 8, background: 'var(--surface-hover)' }}
-                    >
-                      <b>{p.title}</b>
-                      {p.detail !== '' ? ` — ${p.detail}` : ''}
-                    </div>
-                  ))}
-                  {plan !== null && plan.items === m.plan && (
-                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        disabled={planBusy}
-                        onClick={async () => {
-                          setPlanBusy(true)
-                          try {
-                            const r = await request<{ ok: boolean; message?: string }>(
-                              'nova.plan.execute',
-                              { id: plan.planId }
-                            )
-                            push('success', r.message ?? '已应用')
-                            setPlan(null)
-                          } catch (e) {
-                            push('error', String(e))
-                          } finally {
-                            setPlanBusy(false)
-                          }
-                        }}
-                      >
-                        {planBusy ? '执行中…' : '执行'}
-                      </button>
-                      <button
-                        className="btn btn-sm"
-                        disabled={planBusy}
-                        onClick={async () => {
-                          try {
-                            await request('nova.plan.discard', { id: plan.planId })
-                          } catch { /* 忽略 */ }
-                          setPlan(null)
-                        }}
-                      >
-                        放弃
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <input
-            className="input"
-            style={{ flex: 1 }}
-            value={input}
-            placeholder="给 Nova 发消息…"
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) void send()
-            }}
-          />
-          <button className="btn btn-primary" disabled={busy || input.trim() === ''} onClick={() => void send()}>
-            {busy ? '回复中…' : '发送'}
-          </button>
-        </div>
+      {/* Nova 对话浮层（内容与标题栏 Orb 弹层共用同一面板） */}
+      <Modal open={chatOpen} title="Nova" onClose={() => setChatOpen(false)} width={560}>
+        <NovaChatPanel seed={props.seed} />
       </Modal>
 
       {host}

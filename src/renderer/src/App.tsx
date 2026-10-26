@@ -26,6 +26,7 @@ import RunningPage from './pages/Running'
 import AccountsPage from './pages/Accounts'
 import PluginsPage from './pages/Plugins'
 import NovaPage from './pages/Nova'
+import NovaChatPanel from './NovaChatPanel'
 import SettingsPage from './pages/Settings'
 import LogsPage from './pages/Logs'
 
@@ -38,7 +39,9 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
   const session = useGameSession()
   const taskCenter = useTaskCenter()
   const [tasksOpen, setTasksOpen] = useState(false)
-  // 「问 Nova」的预填文本（版本行菜单 → Nova 页自动填入输入框）
+  // 顶栏 Nova Orb 的弹出聊天面板（Win 端 NovaPopup：再点收回，轻触外部关闭）
+  const [novaPanelOpen, setNovaPanelOpen] = useState(false)
+  // 「问 Nova」的预填文本（版本行菜单 / 好友页 → 面板输入框）
   const [novaSeed, setNovaSeed] = useState('')
   /** 已安装版本 id 列表（复制存档到其他版本用） */
   const [installedVersions, setInstalledVersions] = useState<string[]>([])
@@ -48,9 +51,13 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
     void loadAndApplyVisualSettings()
   }, [])
 
-  // 主进程让浮窗点击后跳到 Nova 对话
+  // 主进程让浮窗点击后展开 Nova 面板（Win 端入口⑤：不跳页）；其余目标照常导航
   useEffect(() => {
     const onNavigate = (target: unknown): void => {
+      if (target === 'nova') {
+        setNovaPanelOpen(true)
+        return
+      }
       if (typeof target === 'string') setPage(target as PageKey)
     }
     window.appEvents?.onNavigate(onNavigate)
@@ -120,8 +127,9 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
               setPage('home')
             }}
             onAskNova={(id) => {
+              // Win 同款入口③「问 Nova」：展开顶栏面板承接，不跳页
               setNovaSeed(`帮我给 ${id} 做一次游戏体检，有隐患直接说`)
-              setPage('nova')
+              setNovaPanelOpen(true)
             }}
           />
         )
@@ -203,7 +211,7 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
               className="tb-action-btn"
               title="Nova 助手"
               aria-label="Nova 助手"
-              onClick={() => setPage('nova')}
+              onClick={() => setNovaPanelOpen((v) => !v)}
             >
               {/* Nova = 品牌标记（多色，画不出字形） */}
               <img src={brandMark} alt="" width={16} height={16} />
@@ -267,6 +275,28 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
         onClearNotifications={taskCenter.clearNotifications}
         onClose={() => setTasksOpen(false)}
       />
+      {/* Nova 顶栏弹出面板（Win 端 NovaPopup：Orb 下方 8px、右对齐 440px、轻触关闭） */}
+      {novaPanelOpen && (
+        <>
+          <div
+            className="popup-scrim"
+            onClick={() => {
+              setNovaPanelOpen(false)
+              setNovaSeed('')
+            }}
+          />
+          <div className="nova-flyout">
+            <NovaChatPanel
+              seed={novaSeed}
+              onGoSettings={() => {
+                setNovaPanelOpen(false)
+                setNovaSeed('')
+                setPage('nova')
+              }}
+            />
+          </div>
+        </>
+      )}
     </div>
   )
 }
