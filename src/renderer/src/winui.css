@@ -918,16 +918,18 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
   display: block;
 }
 
-/* 行尾两行数据列：标签与数值跨行左对齐成列 */
+/* 行尾两行数据列：共享列 Grid（对齐 Win 0.3.9）——
+   两列都 auto：标签列以最宽的「上次启动」为基准，两行左边缘齐平；
+   数值列同理左对齐；整体在行内仍贴右（由行 flex 布局把块推到按钮列前） */
 .meta {
   display: grid;
-  grid-template-columns: auto 64px;
+  grid-template-columns: auto auto;
   row-gap: 2px;
   column-gap: 8px;
   flex-shrink: 0;
 }
-.meta-k { font-size: 11px; color: var(--text-tertiary); text-align: right; }
-.meta-v { font-size: 12px; color: var(--text-secondary); text-align: right; }
+.meta-k { font-size: 11px; color: var(--text-tertiary); text-align: left; }
+.meta-v { font-size: 12px; color: var(--text-secondary); text-align: left; }
 
 /* ═══ 空态 / 骨架 / 加载 ═══ */
 .empty {
