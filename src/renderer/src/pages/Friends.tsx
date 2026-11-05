@@ -6,17 +6,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
-import { request } from '../bridge'
+import { nativeApi, onBridgeEvent, request } from '../bridge'
 import type { MultiplayerSnapshot } from '../bridge'
 import type {
   ScConversationPage,
+  ScFileAttachment,
   ScFriend,
   ScFriendInvite,
   ScFriendMessage,
   ScFriendRequests,
   ScFriendSearchResult,
+  ScGroupDetail,
+  ScGroupMessage,
+  ScGroupSummary,
   ScSession
 } from '../bridge-friends'
+import { parseFileAttachment } from '../bridge-friends'
 import MultiplayerPage from './Multiplayer'
 import { EmptyState, InfoBar, Modal, Segmented, Select, useToasts, type ToastKind } from '../ui'
 import { IconMore, IconPlus, IconSearch } from '../icons'
@@ -71,6 +76,27 @@ const previewOf = (last: ScFriendMessage | null | undefined): string =>
   last === null || last === undefined
     ? '还没有消息'
     : last.content.replace(/\r/g, ' ').replace(/\n/g, ' ')
+
+/** 附件气泡里的大小文案。 */
+function fmtBytes(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(0)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+const ATTACH_KIND_LABEL: Record<string, string> = {
+  image: '图片',
+  video: '视频',
+  file: '文件',
+  world: '存档'
+}
+
+/** 任意消息的会话预览文案（好友 / 群通用；附件消息显示类型 + 文件名）。 */
+function previewTextOf(content: string): string {
+  const a = parseFileAttachment(content)
+  if (a !== null) return `[${ATTACH_KIND_LABEL[a.kind] ?? '文件'}] ${a.name}`
+  return content.replace(/\r/g, ' ').replace(/\n/g, ' ')
+}
 
 // ── 菜单按钮（Win MenuFlyout 等价：点击弹出，非右键） ────────────────────────
 
@@ -208,7 +234,7 @@ type Section = 'friends' | 'multiplayer'
 
 /** 会话列表行模型（对应 Win ConversationRowModel）。 */
 interface Row {
-  kind: 'requests' | 'invites' | 'friend'
+  kind: 'requests' | 'invites' | 'friend' | 'group'
   userId: string
   name: string
   initial: string
@@ -232,7 +258,8 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
   const [requestCount, setRequestCount] = useState(0)
   const [inviteTotal, setInviteTotal] = useState(0)
 
-  // 聊天
+  // 聊天（selectedKind = friend / group；selectedUserId 为对应用户或群 id）
+  const [selectedKind, setSelectedKind] = useState<'friend' | 'group' | null>(null)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ScFriendMessage[]>([])
   const [hasMore, setHasMore] = useState(false)
@@ -248,6 +275,17 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [invitesOpen, setInvitesOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
+
+  // 群聊（Win 0.4.0 同口径）
+  const [groups, setGroups] = useState<ScGroupSummary[]>([])
+  const [groupLast, setGroupLast] = useState<Record<string, ScGroupMessage | null>>({})
+  const [groupMessages, setGroupMessages] = useState<ScGroupMessage[]>([])
+  const [groupHasMore, setGroupHasMore] = useState(false)
+  const [groupNextBeforeId, setGroupNextBeforeId] = useState<number | undefined>(undefined)
+  const [groupDetail, setGroupDetail] = useState<ScGroupDetail | null>(null)
+  const [groupMembersOpen, setGroupMembersOpen] = useState(false)
+  const [createGroupOpen, setCreateGroupOpen] = useState(false)
+  const [attachBusy, setAttachBusy] = useState(false)
 
   const msgsRef = useRef<HTMLDivElement | null>(null)
   /** 下一次消息渲染的滚动意图：end = 滚到底，keep = 保持阅读位置（加载更早时）。 */
@@ -315,6 +353,36 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
     }
   }, [ensurePreviews, showBanner])
 
+  /** 群列表（unread 随行返回）；最后一条消息按需补拉，拉过就缓存。 */
+  const refreshGroups = useCallback(async (): Promise<void> => {
+    try {
+      const data = await request<{ groups: ScGroupSummary[] }>('friends.groups')
+      setGroups(data.groups)
+      const missing = data.groups.filter((g) => !(g.group_id in groupLast))
+      if (missing.length > 0) {
+        const patch: Record<string, ScGroupMessage | null> = {}
+        await Promise.all(
+          missing.map(async (g) => {
+            try {
+              const page = await request<{ items: ScGroupMessage[] }>('friends.groupMessages', {
+                groupId: g.group_id,
+                limit: 1
+              })
+              patch[g.group_id] = page.items.at(-1) ?? null
+            } catch {
+              patch[g.group_id] = null
+            }
+          })
+        )
+        setGroupLast((prev) => ({ ...prev, ...patch }))
+      }
+    } catch {
+      // 群接口暂不可用（服务器未上线 / 未登录）时静默降级：
+      // 好友聊天不受影响，群会话行不出现（服务器上线后自动恢复）。
+      setGroups([])
+    }
+  }, [groupLast])
+
   const refreshAll = useCallback(async (): Promise<void> => {
     const state = await request<ScSession>('starcloud.state').catch(() => null)
     setSession(state)
@@ -322,29 +390,68 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
       setLoaded(true)
       return
     }
-    await Promise.all([refreshFriends(), refreshCounts()])
+    await Promise.all([refreshFriends(), refreshCounts(), refreshGroups()])
     setLoaded(true)
-  }, [refreshCounts, refreshFriends])
+  }, [refreshCounts, refreshFriends, refreshGroups])
 
   useEffect(() => {
     void refreshAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 轮询（替代 Win 端 SSE）：只刷列表与计数，聊天内容在打开会话时拉取
+  // 轮询兜底：桥接 friends.event（SSE）为主，20s 轮询兜断线
   useEffect(() => {
     if (session === null || !session.loggedIn || section !== 'friends') return
     const timer = window.setInterval(() => {
       void refreshFriends()
       void refreshCounts()
+      void refreshGroups()
     }, 20_000)
     return () => window.clearInterval(timer)
-  }, [session, section, refreshFriends, refreshCounts])
+  }, [session, section, refreshFriends, refreshCounts, refreshGroups])
+
+  // 好友实时事件（桥接 friends.event：SSE 转发，Win FriendsRuntime 等价）
+  useEffect(() => {
+    onBridgeEvent((event, params) => {
+      if (event !== 'friends.event') return
+      const type = String(params.type ?? '')
+      if (type === 'friend_message') {
+        const m = params.data as unknown as ScFriendMessage
+        const me = session?.userId ?? ''
+        const peer = m.from_user_id === me ? m.to_user_id : m.from_user_id
+        if (selectedKind === 'friend' && selectedUserId === peer) {
+          setMessages((prev) =>
+            prev.some((x) => x.id === m.id) ? prev : [...prev, m]
+          )
+          if (m.from_user_id !== me) {
+            void request('friends.markRead', { userId: peer }).catch(() => undefined)
+          }
+        }
+        setLastMessages((prev) => ({ ...prev, [peer]: m }))
+      } else if (type === 'group_message') {
+        const m = params.data as unknown as ScGroupMessage
+        const me = session?.userId ?? ''
+        if (selectedKind === 'group' && selectedUserId === m.group_id) {
+          setGroupMessages((prev) =>
+            prev.some((x) => x.id === m.id) ? prev : [...prev, m]
+          )
+          if (m.from_user_id !== me) {
+            void request('friends.groupMarkRead', { groupId: m.group_id }).catch(() => undefined)
+          }
+        }
+        setGroupLast((prev) => ({ ...prev, [m.group_id]: m }))
+        void refreshGroups()
+      } else {
+        void refreshAll()
+      }
+    })
+  }, [session, selectedKind, selectedUserId, refreshAll, refreshGroups])
 
   // ── 聊天区 ──
 
   const openConversation = useCallback(
     async (userId: string): Promise<void> => {
+      setSelectedKind('friend')
       setSelectedUserId(userId)
       setMessages([])
       setHasMore(false)
@@ -370,13 +477,46 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
     [selectedUserId, showBanner]
   )
 
+  /** 打开群聊：消息页 + 群详情（头部成员数用）。 */
+  const openGroup = useCallback(
+    async (groupId: string): Promise<void> => {
+      setSelectedKind('group')
+      setSelectedUserId(groupId)
+      setGroupMessages([])
+      setGroupHasMore(false)
+      setGroupNextBeforeId(undefined)
+      scrollIntent.current = 'end'
+      try {
+        const [msgData, detail] = await Promise.all([
+          request<{ items: ScGroupMessage[] }>('friends.groupMessages', { groupId, limit: 100 }),
+          request<{ group: ScGroupDetail }>('friends.groupDetail', { groupId })
+        ])
+        if (selectedKind !== null && selectedKind !== 'group') return
+        if (selectedUserId !== null && selectedUserId !== groupId) return
+        setGroupMessages(msgData.items)
+        setGroupHasMore(false)
+        setGroupNextBeforeId(undefined)
+        const last = msgData.items.at(-1)
+        if (last !== undefined) setGroupLast((prev) => ({ ...prev, [groupId]: last }))
+        setGroupDetail(detail.group)
+        await request('friends.groupMarkRead', { groupId })
+        setGroups((prev) =>
+          prev.map((g) => (g.group_id === groupId ? { ...g, unread: 0 } : g))
+        )
+      } catch (e) {
+        showBanner('error', String(e))
+      }
+    },
+    [selectedKind, selectedUserId, showBanner]
+  )
+
   useEffect(() => {
     // 消息渲染后按意图滚动
     const el = msgsRef.current
     if (el === null) return
     if (scrollIntent.current === 'end') el.scrollTop = el.scrollHeight
     scrollIntent.current = 'end'
-  }, [messages])
+  }, [messages, groupMessages])
 
   const sendingRef = useRef(false)
   const sendMessage = useCallback(async (): Promise<void> => {
@@ -385,20 +525,110 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
     if (text === '') return
     sendingRef.current = true
     try {
-      const data = await request<{ message: ScFriendMessage }>('friends.send', {
-        userId: selectedUserId,
-        content: text
-      })
-      setDraft('')
-      scrollIntent.current = 'end'
-      setMessages((prev) => [...prev, data.message])
-      setLastMessages((prev) => ({ ...prev, [selectedUserId]: data.message }))
+      if (selectedKind === 'group') {
+        const data = await request<{ message: ScGroupMessage }>('friends.groupSend', {
+          groupId: selectedUserId,
+          content: text
+        })
+        setDraft('')
+        scrollIntent.current = 'end'
+        setGroupMessages((prev) => [...prev, data.message])
+        setGroupLast((prev) => ({ ...prev, [selectedUserId]: data.message }))
+      } else {
+        const data = await request<{ message: ScFriendMessage }>('friends.send', {
+          userId: selectedUserId,
+          content: text
+        })
+        setDraft('')
+        scrollIntent.current = 'end'
+        setMessages((prev) => [...prev, data.message])
+        setLastMessages((prev) => ({ ...prev, [selectedUserId]: data.message }))
+      }
     } catch (e) {
       showBanner('error', String(e))
     } finally {
       sendingRef.current = false
     }
-  }, [draft, selectedUserId, showBanner])
+  }, [draft, selectedKind, selectedUserId, showBanner])
+
+  /** 发送附件：选文件 → 上传 → 以编码消息发出（好友或群通用）。 */
+  const sendFile = useCallback(async (): Promise<void> => {
+    const nat = nativeApi()
+    if (nat === null || selectedUserId === null || attachBusy) return
+    const path = await nat.pickFile('选择要发送的文件')
+    if (path === null) return
+    setAttachBusy(true)
+    try {
+      const up = await request<{
+        id: string
+        size: number
+        kind: string
+        content: string
+      }>('friends.uploadFile', { path })
+      if (selectedKind === 'group') {
+        const data = await request<{ message: ScGroupMessage }>('friends.groupSend', {
+          groupId: selectedUserId,
+          content: up.content
+        })
+        scrollIntent.current = 'end'
+        setGroupMessages((prev) => [...prev, data.message])
+        setGroupLast((prev) => ({ ...prev, [selectedUserId]: data.message }))
+      } else {
+        const data = await request<{ message: ScFriendMessage }>('friends.send', {
+          userId: selectedUserId,
+          content: up.content
+        })
+        scrollIntent.current = 'end'
+        setMessages((prev) => [...prev, data.message])
+        setLastMessages((prev) => ({ ...prev, [selectedUserId]: data.message }))
+      }
+    } catch (e) {
+      showBanner('error', `发送文件失败：${String(e)}`)
+    } finally {
+      setAttachBusy(false)
+    }
+  }, [attachBusy, selectedKind, selectedUserId, showBanner])
+
+  /** 下载附件气泡里的文件（用户选保存位置）。 */
+  const downloadAttachment = useCallback(
+    async (a: ScFileAttachment): Promise<void> => {
+      const nat = nativeApi()
+      if (nat === null) {
+        showBanner('info', '下载文件需要桌面端')
+        return
+      }
+      const dest = await nat.pickSaveFile('保存附件', a.name)
+      if (dest === null) return
+      try {
+        await request('friends.downloadFile', { fileId: a.id, destPath: dest })
+        push('success', `已保存：${dest}`)
+      } catch (e) {
+        push('error', `下载失败：${String(e)}`)
+      }
+    },
+    [push, showBanner]
+  )
+
+  /** 加载更早的群消息。 */
+  const loadOlderGroup = useCallback(async (): Promise<void> => {
+    if (selectedUserId === null || groupNextBeforeId === undefined) return
+    try {
+      const data = await request<{ items: ScGroupMessage[] }>('friends.groupMessages', {
+        groupId: selectedUserId,
+        beforeId: groupNextBeforeId,
+        limit: 100
+      })
+      const known = new Set(groupMessages.map((m) => m.id))
+      const older = data.items.filter((m) => !known.has(m.id))
+      scrollIntent.current = 'keep'
+      setGroupMessages((prev) => [...older, ...prev])
+      const first = older.at(0)
+      if (first !== undefined) setGroupNextBeforeId(first.id)
+      setGroupHasMore(older.length >= 100)
+    } catch (e) {
+      showBanner('error', String(e))
+    }
+  }, [groupMessages, groupNextBeforeId, selectedUserId, showBanner])
 
   const loadOlder = useCallback(async (): Promise<void> => {
     if (selectedUserId === null || nextBeforeId === undefined) return
@@ -475,6 +705,23 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
         id: f.id
       })
     }
+    for (const g of groups) {
+      const last = groupLast[g.group_id]
+      list.push({
+        kind: 'group',
+        userId: g.group_id,
+        name: g.name,
+        initial: initialOf(g.name, g.group_id),
+        preview:
+          last !== null && last !== undefined
+            ? previewTextOf(last.content)
+            : `${g.member_count} 名成员`,
+        timeText: formatStamp(last?.created_at),
+        unread: Math.max(g.unread, 0),
+        sortTime: parseTime(last?.created_at)?.getTime() ?? 0,
+        id: g.group_id
+      })
+    }
     const kw = filter.trim().toLowerCase()
     const filtered =
       kw === ''
@@ -488,7 +735,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
       .filter((r) => r.system === undefined)
       .sort((a, b) => b.sortTime - a.sortTime || a.name.localeCompare(b.name, 'zh'))
     return [...system, ...personRows]
-  }, [friends, filter, inviteTotal, lastMessages, requestCount])
+  }, [friends, groups, groupLast, filter, inviteTotal, lastMessages, requestCount])
 
   // ── 弹窗子组件的状态放外面，页面重挂载不丢 ──
 
@@ -604,6 +851,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                 title="添加"
                 items={[
                   { label: '添加好友', onSelect: () => setAddOpen(true) },
+                  { label: '创建群聊', onSelect: () => setCreateGroupOpen(true) },
                   { label: '好友申请', onSelect: openRequestsDialog },
                   { label: '联机邀请', onSelect: openInvitesDialog }
                 ]}
@@ -616,10 +864,17 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
               {rows.map((r) => (
                 <button
                   key={`${r.kind}:${r.userId}`}
-                  className={`fr-row${r.userId !== '' && r.userId === selectedUserId ? ' fr-row-active' : ''}`}
+                  className={`fr-row${
+                    r.userId !== '' &&
+                    r.userId === selectedUserId &&
+                    (r.kind === selectedKind || r.system !== undefined)
+                      ? ' fr-row-active'
+                      : ''
+                  }`}
                   onClick={() => {
                     if (r.system === 'requests') openRequestsDialog()
                     else if (r.system === 'invites') openInvitesDialog()
+                    else if (r.kind === 'group') void openGroup(r.userId)
                     else void openConversation(r.userId)
                   }}
                 >
@@ -654,13 +909,97 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
 
           {/* 右：聊天 */}
           <div className="card" style={{ padding: 0, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-            {selectedFriend === null ? (
+            {selectedFriend === null && selectedKind !== 'group' ? (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-primary)' }}>
                 <span style={{ opacity: 0.12 }}>
                   <ChatWatermark />
                 </span>
               </div>
-            ) : (
+            ) : selectedKind === 'group' ? (
+              <>
+                <div className="fr-chat-head">
+                  <span className="fr-avatar">{initialOf(groupDetail?.name ?? '', selectedUserId ?? '')}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="t-strong truncate">{groupDetail?.name ?? ''}</div>
+                    <div className="t-cap truncate">
+                      {groupDetail === null ? '' : `${groupDetail.members.length} 名成员`}
+                    </div>
+                  </div>
+                  <MenuButton
+                    title="群聊操作"
+                    items={[
+                      { label: '加载更早的消息', onSelect: () => void loadOlderGroup(), disabled: !groupHasMore },
+                      { label: '群成员', onSelect: () => setGroupMembersOpen(true) },
+                      {
+                        label: '解散群聊',
+                        danger: true,
+                        disabled: groupDetail !== null && session?.userId !== groupDetail.owner_id,
+                        onSelect: async () => {
+                          if (groupDetail === null || !window.confirm(`确定解散「${groupDetail.name}」吗？此操作不可恢复。`)) return
+                          try {
+                            await request('friends.groupDissolve', { groupId: groupDetail.group_id })
+                            push('success', '群聊已解散')
+                            setSelectedKind(null)
+                            setSelectedUserId(null)
+                            setGroupDetail(null)
+                            await refreshGroups()
+                          } catch (e) {
+                            push('error', String(e))
+                          }
+                        }
+                      }
+                    ]}
+                  />
+                </div>
+
+                <div className="fr-msgs" ref={msgsRef}>
+                  <ChatRows
+                    lines={groupMessages.map((m) => ({
+                      key: String(m.id),
+                      mine: m.from_user_id === (session?.userId ?? ''),
+                      fromId: m.from_user_id,
+                      content: m.content,
+                      createdAt: m.created_at
+                    }))}
+                    meId={session?.userId ?? ''}
+                    onDownload={(a) => void downloadAttachment(a)}
+                  />
+                </div>
+
+                <div className="fr-composer">
+                  <button
+                    className="btn"
+                    style={{ height: 36, padding: '0 12px' }}
+                    title="发送文件"
+                    disabled={attachBusy}
+                    onClick={() => void sendFile()}
+                  >
+                    <IconPlus size={15} />
+                  </button>
+                  <textarea
+                    className="input"
+                    style={{ minHeight: 36, maxHeight: 110, height: 36, resize: 'none', paddingTop: 7.5, flex: 1 }}
+                    placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        void sendMessage()
+                      }
+                    }}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    style={{ height: 36, padding: '0 18px', fontWeight: 600 }}
+                    disabled={attachBusy}
+                    onClick={() => void sendMessage()}
+                  >
+                    发送
+                  </button>
+                </div>
+              </>
+            ) : selectedFriend !== null ? (
               <>
                 <div className="fr-chat-head">
                   <span className="fr-avatar">{initialOf(selectedFriend.display_name, selectedFriend.id)}</span>
@@ -684,17 +1023,31 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
 
                 <div className="fr-msgs" ref={msgsRef}>
                   <ChatRows
-                    messages={messages}
+                    lines={messages.map((m) => ({
+                      key: String(m.id),
+                      mine: m.from_user_id === (session?.userId ?? ''),
+                      fromId: m.from_user_id,
+                      content: m.content,
+                      createdAt: m.created_at
+                    }))}
                     meId={session?.userId ?? ''}
                     myInitial={initialOf(session?.displayName ?? '', session?.userId ?? '')}
-                    friendInitial={initialOf(selectedFriend.display_name, selectedFriend.id)}
                   />
                 </div>
 
                 <div className="fr-composer">
+                  <button
+                    className="btn"
+                    style={{ height: 36, padding: '0 12px' }}
+                    title="发送文件"
+                    disabled={attachBusy}
+                    onClick={() => void sendFile()}
+                  >
+                    <IconPlus size={15} />
+                  </button>
                   <textarea
                     className="input"
-                    style={{ minHeight: 36, maxHeight: 110, height: 36, resize: 'none', paddingTop: 7.5 }}
+                    style={{ minHeight: 36, maxHeight: 110, height: 36, resize: 'none', paddingTop: 7.5, flex: 1 }}
                     placeholder="输入消息，Enter 发送，Shift+Enter 换行"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
@@ -708,13 +1061,14 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                   <button
                     className="btn btn-primary"
                     style={{ height: 36, padding: '0 18px', fontWeight: 600 }}
+                    disabled={attachBusy}
                     onClick={() => void sendMessage()}
                   >
                     发送
                   </button>
                 </div>
               </>
-            )}
+            ) : null}
           </div>
         </div>
       )}
@@ -753,6 +1107,41 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
           void refreshCounts()
         }}
       />
+      <CreateGroupDialog
+        open={createGroupOpen}
+        friends={friends}
+        onClose={() => setCreateGroupOpen(false)}
+        onCreated={(group) => {
+          setCreateGroupOpen(false)
+          void refreshGroups()
+          void openGroup(group.group_id)
+        }}
+      />
+      <GroupMembersDialog
+        open={groupMembersOpen}
+        group={groupDetail}
+        friends={friends}
+        onClose={() => setGroupMembersOpen(false)}
+        onChanged={async () => {
+          if (selectedKind === 'group' && selectedUserId !== null) {
+            try {
+              const detail = await request<{ group: ScGroupDetail }>('friends.groupDetail', {
+                groupId: selectedUserId
+              })
+              setGroupDetail(detail.group)
+            } catch {
+              setGroupDetail(null)
+            }
+          }
+        }}
+        onDissolved={() => {
+          setGroupMembersOpen(false)
+          setSelectedKind(null)
+          setSelectedUserId(null)
+          setGroupDetail(null)
+          void refreshGroups()
+        }}
+      />
       {host}
     </div>
   )
@@ -761,32 +1150,277 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
 // ── 聊天消息渲染（QQ 习惯：自己靠右、对方靠左，头像在气泡外侧，>5 分钟插时间） ──
 
 function ChatRows(props: {
-  messages: ScFriendMessage[]
+  /** 归一化消息行（好友 / 群通用；群聊按发送者取首字母，好友聊天自己用 myInitial）。 */
+  lines: Array<{
+    key: string
+    mine: boolean
+    fromId: string
+    content: string
+    createdAt: string
+  }>
   meId: string
-  myInitial: string
-  friendInitial: string
+  /** 好友聊天：自己的头像首字母（昵称优先，与原实现一致）。 */
+  myInitial?: string
+  /** 群聊回调：下载附件。 */
+  onDownload?: (a: ScFileAttachment) => void
 }): JSX.Element {
   const nodes: JSX.Element[] = []
   let previous: Date | null = null
-  props.messages.forEach((m, i) => {
-    const time = parseTime(m.created_at)
+  props.lines.forEach((line) => {
+    const time = parseTime(line.createdAt)
     if (time !== null && (previous === null || time.getTime() - previous.getTime() > 5 * 60_000)) {
       nodes.push(
-        <div key={`t${m.id}`} className="fr-time-sep">
+        <div key={`t${line.key}`} className="fr-time-sep">
           {formatSeparator(time)}
         </div>
       )
     }
     if (time !== null) previous = time
-    const mine = m.from_user_id === props.meId
+    const mine = line.mine
+    const attachment = parseFileAttachment(line.content)
+    const isGroup = props.onDownload !== undefined
+    const initial =
+      mine && !isGroup && props.myInitial !== undefined ? props.myInitial : initialOf(line.fromId, line.fromId)
     nodes.push(
-      <div key={m.id} className={`fr-msg${mine ? ' fr-msg-mine' : ''}`}>
-        <span className="fr-avatar fr-avatar-sm">{mine ? props.myInitial : props.friendInitial}</span>
-        <span className={`fr-bubble${mine ? ' fr-bubble-mine' : ''}`}>{m.content}</span>
+      <div key={line.key} className={`fr-msg${mine ? ' fr-msg-mine' : ''}`}>
+        <span className="fr-avatar fr-avatar-sm">{initial}</span>
+        {attachment !== null ? (
+          <span className={`fr-bubble fr-file-bubble${mine ? ' fr-bubble-mine' : ''}`}>
+            <span className="fr-file-info" style={{ minWidth: 0 }}>
+              <span className="fr-file-name truncate" style={{ display: 'block' }}>
+                {attachment.name}
+              </span>
+              <span className="fr-file-meta">
+                {ATTACH_KIND_LABEL[attachment.kind] ?? '文件'} · {fmtBytes(attachment.size)}
+              </span>
+            </span>
+            {props.onDownload !== undefined && (
+              <button
+                className="btn btn-sm"
+                style={{ flexShrink: 0 }}
+                onClick={() => props.onDownload?.(attachment)}
+              >
+                下载
+              </button>
+            )}
+          </span>
+        ) : (
+          <span className={`fr-bubble${mine ? ' fr-bubble-mine' : ''}`}>{line.content}</span>
+        )}
       </div>
     )
   })
   return <>{nodes}</>
+}
+
+// ── 创建群聊（Win CreateGroupMenu_Click：群名 + 好友多选） ──────────────────
+
+function CreateGroupDialog(props: {
+  open: boolean
+  friends: ScFriend[]
+  onClose: () => void
+  onCreated: (group: ScGroupDetail) => void
+}): JSX.Element | null {
+  const [name, setName] = useState('')
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+  if (!props.open) return null
+
+  const toggle = (userId: string): void => {
+    setPicked((prev) => {
+      const next = new Set(prev)
+      if (next.has(userId)) next.delete(userId)
+      else next.add(userId)
+      return next
+    })
+  }
+
+  const create = async (): Promise<void> => {
+    if (busy || name.trim() === '') return
+    setBusy(true)
+    try {
+      const data = await request<{ group: ScGroupDetail }>('friends.groupCreate', {
+        name: name.trim(),
+        members: [...picked]
+      })
+      setName('')
+      setPicked(new Set())
+      props.onCreated(data.group)
+    } catch (e) {
+      setName((v) => v)
+      alert(`创建群聊失败：${String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open title="创建群聊" onClose={props.onClose} width={480}
+      footer={
+        <>
+          <button className="btn" disabled={busy} onClick={props.onClose}>取消</button>
+          <button
+            className="btn btn-primary"
+            style={{ fontWeight: 600 }}
+            disabled={busy || name.trim() === ''}
+            onClick={() => void create()}
+          >
+            {busy ? '创建中…' : '创建'}
+          </button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <input
+          className="input"
+          placeholder="群名称"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <div className="t-cap">从好友选择成员（可多选，可留空稍后添加）</div>
+        <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {props.friends.length === 0 && <div className="t-cap">还没有好友可拉入群聊。</div>}
+          {props.friends.map((f) => (
+            <label
+              key={f.user_id}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+            >
+              <input
+                type="checkbox"
+                checked={picked.has(f.user_id)}
+                onChange={() => toggle(f.user_id)}
+              />
+              <span className="t-body truncate">
+                {f.display_name}（{f.id}）
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ── 群成员管理（成员列表 + 加人 + 群主解散） ────────────────────────────────
+
+function GroupMembersDialog(props: {
+  open: boolean
+  group: ScGroupDetail | null
+  friends: ScFriend[]
+  onClose: () => void
+  onChanged: () => void | Promise<void>
+  onDissolved: () => void
+}): JSX.Element | null {
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+  if (!props.open || props.group === null) return null
+  const meIsOwner = props.group.owner_id !== ''
+
+  const toggle = (userId: string): void => {
+    setPicked((prev) => {
+      const next = new Set(prev)
+      if (next.has(userId)) next.delete(userId)
+      else next.add(userId)
+      return next
+    })
+  }
+
+  const addMembers = async (): Promise<void> => {
+    if (busy || picked.size === 0) return
+    setBusy(true)
+    try {
+      await request('friends.groupAddMembers', {
+        groupId: props.group!.group_id,
+        members: [...picked]
+      })
+      setPicked(new Set())
+      await props.onChanged()
+    } catch (e) {
+      alert(`添加成员失败：${String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const dissolve = async (): Promise<void> => {
+    if (busy || !window.confirm(`确定解散「${props.group!.name}」吗？此操作不可恢复。`)) return
+    setBusy(true)
+    try {
+      await request('friends.groupDissolve', { groupId: props.group!.group_id })
+      props.onDissolved()
+    } catch (e) {
+      alert(`解散失败：${String(e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const memberIds = new Set(props.group.members.map((m) => m.user_id))
+  const addable = props.friends.filter((f) => !memberIds.has(f.user_id))
+
+  return (
+    <Modal open title={`群成员 · ${props.group.name}`} onClose={props.onClose} width={480}
+      footer={
+        <>
+          {meIsOwner && (
+            <button className="btn btn-danger" disabled={busy} onClick={() => void dissolve()}>
+              解散群聊
+            </button>
+          )}
+          <button className="btn" onClick={props.onClose}>关闭</button>
+        </>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="t-cap">{props.group.members.length} 名成员</div>
+        <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {props.group.members.map((m) => (
+            <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="fr-avatar fr-avatar-sm">
+                {initialOf(m.user_id, m.user_id)}
+              </span>
+              <span className="t-body truncate" style={{ flex: 1 }}>
+                {m.user_id}
+                {m.role === 'owner' && (
+                  <span className="chip chip-accent" style={{ marginLeft: 8 }}>群主</span>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+        {addable.length > 0 && (
+          <>
+            <div className="t-cap">从好友添加（可多选）</div>
+            <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {addable.map((f) => (
+                <label
+                  key={f.user_id}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={picked.has(f.user_id)}
+                    onChange={() => toggle(f.user_id)}
+                  />
+                  <span className="t-body truncate">
+                    {f.display_name}（{f.id}）
+                  </span>
+                </label>
+              ))}
+            </div>
+            <button
+              className="btn btn-primary"
+              disabled={busy || picked.size === 0}
+              onClick={() => void addMembers()}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              {busy ? '处理中…' : `添加所选（${picked.size}）`}
+            </button>
+          </>
+        )}
+      </div>
+    </Modal>
+  )
 }
 
 // ── 添加好友（Win FriendsDialogs.AddFriendAsync） ────────────────────────────

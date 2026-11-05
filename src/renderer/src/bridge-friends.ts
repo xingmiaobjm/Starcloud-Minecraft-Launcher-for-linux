@@ -82,3 +82,57 @@ export interface ScSession {
   channel?: string
   loginAt?: string
 }
+
+/** 群成员（role: owner / member）。 */
+export interface ScGroupMember {
+  user_id: string
+  role: string
+}
+
+/** 群详情（含成员列表）。 */
+export interface ScGroupDetail {
+  group_id: string
+  name: string
+  owner_id: string
+  members: ScGroupMember[]
+}
+
+/** 群摘要（会话列表行）。 */
+export interface ScGroupSummary {
+  group_id: string
+  name: string
+  owner_id: string
+  member_count: number
+  unread: number
+}
+
+/** 一条群消息。 */
+export interface ScGroupMessage {
+  id: number
+  group_id: string
+  from_user_id: string
+  content: string
+  created_at: string
+}
+
+/** 聊天附件（消息文本 = [文件] 前缀 + 该结构的 JSON）。 */
+export interface ScFileAttachment {
+  name: string
+  size: number
+  kind: string
+  id: string
+}
+
+/** 附件消息前缀（与 Core FriendsService.FileMessagePrefix 一致）。 */
+export const FILE_MESSAGE_PREFIX = '[文件]'
+
+/** 解析附件消息（Core TryParseFileMessage 同口径；非附件返回 null）。 */
+export function parseFileAttachment(content: string | undefined): ScFileAttachment | null {
+  if (content === undefined || !content.startsWith(FILE_MESSAGE_PREFIX)) return null
+  try {
+    const a = JSON.parse(content.slice(FILE_MESSAGE_PREFIX.length)) as ScFileAttachment
+    return a.id !== '' ? a : null
+  } catch {
+    return null
+  }
+}
