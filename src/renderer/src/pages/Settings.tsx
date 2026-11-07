@@ -140,6 +140,11 @@ const EMPTY: SettingsSnapshot = {
   deviceLinkEnabled: false,
   deviceName: '',
   p2pDownloadEnabled: true,
+  p2pInternetEnabled: false,
+  p2pInternetUploadMbps: 4,
+  deviceP2pCrossAccount: true,
+  microsoftTokenPersist: true,
+  homeVersionCardMode: 'installed',
   autoUpdateEnabled: true,
   updateManifestUrl: ''
 }
@@ -675,6 +680,24 @@ export default function SettingsPage(props: {
               </div>
 
               <div className="card">
+                <SectionTitle>主页版本列表</SectionTitle>
+                <Field
+                  label="主页显示哪组版本"
+                  hint="收藏与置顶在版本列表的右键菜单里标记；对应的列表为空时会给出标记引导"
+                >
+                  <Segmented<string>
+                    value={s.homeVersionCardMode}
+                    options={[
+                      { value: 'installed', label: '已安装的版本' },
+                      { value: 'favorites', label: '收藏的版本' },
+                      { value: 'pinned', label: '置顶的版本' }
+                    ]}
+                    onChange={(v) => set('homeVersionCardMode', v)}
+                  />
+                </Field>
+              </div>
+
+              <div className="card">
                 <SectionTitle>性能与动效</SectionTitle>
                 <Field
                   label="动效档位"
@@ -769,6 +792,17 @@ export default function SettingsPage(props: {
                     checked={s.microsoftLoginEmbedded}
                     onChange={(v) => set('microsoftLoginEmbedded', v)}
                     label="内置登录窗口"
+                  />
+                </Field>
+                <Field
+                  label="加密保存登录令牌"
+                  hint="访问令牌与刷新令牌一起加密后保存在本机，重启后 30 天内免登录。关闭后只保留刷新令牌，重启时需要联网换一次访问令牌"
+                  inline
+                >
+                  <Toggle
+                    checked={s.microsoftTokenPersist}
+                    onChange={(v) => set('microsoftTokenPersist', v)}
+                    label="加密保存登录令牌"
                   />
                 </Field>
               </div>
@@ -872,6 +906,41 @@ export default function SettingsPage(props: {
                     label="P2P 下载加速"
                   />
                 </Field>
+                <Field
+                  label="包含其他用户设备"
+                  hint="局域网内任何登录了 Starcloud ID 的星云启动器都可提供游戏文件；跨账号只开放按 SHA1 取文件的通道，内容校验不过即丢弃，存档同步仍只限同账号"
+                  inline
+                >
+                  <Toggle
+                    checked={s.deviceP2pCrossAccount}
+                    onChange={(v) => set('deviceP2pCrossAccount', v)}
+                    label="包含其他用户设备"
+                  />
+                </Field>
+                <Field
+                  label="高级传递优化"
+                  hint="利用您的闲置带宽加速其他用户的下载，同时其他用户也会加速您的下载"
+                  inline
+                >
+                  <Toggle
+                    checked={s.p2pInternetEnabled}
+                    onChange={(v) => set('p2pInternetEnabled', v)}
+                    label="高级传递优化"
+                  />
+                </Field>
+                {s.p2pInternetEnabled && (
+                  <Field
+                    label={`最大上传速度（${s.p2pInternetUploadMbps} Mbps）`}
+                    hint="上传带宽充足时可以调高，下载会更顺畅"
+                  >
+                    <Slider
+                      value={s.p2pInternetUploadMbps}
+                      min={1}
+                      max={32}
+                      onChange={(v) => set('p2pInternetUploadMbps', v)}
+                    />
+                  </Field>
+                )}
                 <InfoBar kind="info" title="需要 Starcloud ID">
                   同步与 P2P 加速需要登录 Starcloud ID。
                 </InfoBar>

@@ -918,16 +918,18 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
   display: block;
 }
 
-/* 行尾两行数据列：标签与数值跨行左对齐成列 */
+/* 行尾两行数据列：共享列 Grid（对齐 Win 0.3.9）——
+   两列都 auto：标签列以最宽的「上次启动」为基准，两行左边缘齐平；
+   数值列同理左对齐；整体在行内仍贴右（由行 flex 布局把块推到按钮列前） */
 .meta {
   display: grid;
-  grid-template-columns: auto 64px;
+  grid-template-columns: auto auto;
   row-gap: 2px;
   column-gap: 8px;
   flex-shrink: 0;
 }
-.meta-k { font-size: 11px; color: var(--text-tertiary); text-align: right; }
-.meta-v { font-size: 12px; color: var(--text-secondary); text-align: right; }
+.meta-k { font-size: 11px; color: var(--text-tertiary); text-align: left; }
+.meta-v { font-size: 12px; color: var(--text-secondary); text-align: left; }
 
 /* ═══ 空态 / 骨架 / 加载 ═══ */
 .empty {
@@ -1355,6 +1357,17 @@ input[type='range']::-moz-range-thumb {
   user-select: text;
 }
 .fr-bubble-mine { background: var(--accent); color: var(--text-on-accent); }
+/* 附件气泡（图片 / 视频 / 文件 / 存档卡片：图标信息 + 下载按钮） */
+.fr-file-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, 76%);
+  white-space: normal;
+}
+.fr-file-info { display: flex; flex-direction: column; gap: 2px; }
+.fr-file-name { font-weight: 600; font-size: 13px; }
+.fr-file-meta { font-size: 11px; opacity: 0.72; }
 .fr-time-sep {
   text-align: center;
   font-size: 10px;

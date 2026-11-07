@@ -18,7 +18,7 @@ import neoforgeIcon from '../assets/mc-icons/neoforge.png'
 import forgeIcon from '../assets/mc-icons/forge.png'
 import fabricIcon from '../assets/mc-icons/fabric.png'
 import quiltIcon from '../assets/mc-icons/quilt.png'
-import { IconFolder, IconImport, IconLink, IconRefresh, IconMore, IconTrash } from '../icons'
+import { IconFolder, IconImport, IconRefresh, IconMore, IconTrash } from '../icons'
 
 const LOADER_ICONS: Record<string, string> = {
   neoforge: neoforgeIcon,
@@ -198,8 +198,7 @@ export default function VersionsPage(props: {
     { label: '重命名', onSelect: () => openRename(menuRef.current) },
     { label: '复制版本', onSelect: () => openCopy(menuRef.current) },
     { label: '导出整合包', onSelect: () => void openExport(menuRef.current) },
-    { label: '导入整合包', onSelect: () => void pickAndPreview() },
-    { label: '从链接导入', onSelect: () => setLinkOpen(true) },
+    { label: '导入整合包', onSelect: () => setImportOpen(true) },
     { label: '备份与回档', onSelect: () => void openBackup(menuRef.current) },
     { label: '', separator: true },
     { label: '问 Nova', onSelect: () => menuRef.current !== null && props.onAskNova(menuRef.current.id) },
@@ -232,7 +231,9 @@ export default function VersionsPage(props: {
   const [exportBusy, setExportBusy] = useState(false)
   const [progress, setProgress] = useState<{ stage: string; percent: number } | null>(null)
 
-  // ── 导入（文件 / 链接共用预览弹窗） ──
+  // ── 导入（方式选择弹窗：拖入 / 选文件 / 链接，文件与链接共用预览弹窗） ──
+  const [importOpen, setImportOpen] = useState(false)
+  const [dropHot, setDropHot] = useState(false)
   const [importPack, setImportPack] = useState<{ path: string; preview: PackPreview } | null>(null)
   const [importName, setImportName] = useState('')
   const [importIsolated, setImportIsolated] = useState(true)
@@ -466,11 +467,26 @@ export default function VersionsPage(props: {
       push('info', '整合包导入需要桌面端（文件选择框不可用）')
       return
     }
+    setImportOpen(false)
     const path = await nat.pickFile('选择整合包', [
       { name: '整合包（.mrpack / .zip）', extensions: ['mrpack', 'zip'] }
     ])
     if (path === null) return
     await previewPack(path)
+  }
+
+  /** 拖入文件 → 换本地路径 → 预览（Win ImportPackDialog.Drop 同款过滤：.mrpack / .zip） */
+  function handlePackDrop(e: React.DragEvent): void {
+    e.preventDefault()
+    const file = [...e.dataTransfer.files].find((f) => /\.(mrpack|zip)$/i.test(f.name))
+    if (file === undefined) return
+    const path = nat?.getPathForFile(file) ?? ''
+    if (path === '') {
+      push('info', '无法获取拖入文件的路径')
+      return
+    }
+    setImportOpen(false)
+    void previewPack(path)
   }
 
   async function previewPack(packPath: string): Promise<void> {
@@ -666,11 +682,8 @@ export default function VersionsPage(props: {
             {gameDir === '' ? '游戏目录' : gameDir}
           </span>
         </div>
-        <button className="btn" onClick={() => void pickAndPreview()} title="导入整合包">
+        <button className="btn" onClick={() => setImportOpen(true)} title="导入整合包">
           <IconImport size={15} /> 导入整合包
-        </button>
-        <button className="btn" onClick={() => setLinkOpen(true)} title="从链接导入">
-          <IconLink size={15} /> 从链接导入
         </button>
         <input
           className="input"
@@ -1042,6 +1055,50 @@ export default function VersionsPage(props: {
             {importBusy && progressBlock}
           </div>
         )}
+      </Modal>
+
+      {/* 导入整合包：方式选择弹窗（Win ImportPackDialog 同款：拖入 / 选文件 / 从链接导入） */}
+      <Modal open={importOpen} title="导入整合包" onClose={() => setImportOpen(false)} width={520}>
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            setDropHot(true)
+          }}
+          onDragLeave={() => setDropHot(false)}
+          onDrop={(e) => {
+            setDropHot(false)
+            handlePackDrop(e)
+          }}
+          style={{
+            border: dropHot
+              ? '1.5px solid var(--accent)'
+              : '1.5px dashed var(--stroke-strong)',
+            borderRadius: 8,
+            background: 'var(--surface-subtle)',
+            padding: '26px 24px',
+            textAlign: 'center'
+          }}
+        >
+          <div style={{ fontSize: 14, color: 'var(--text-primary)' }}>把整合包拖到这里</div>
+          <div className="t-cap" style={{ marginTop: 4 }}>
+            支持 .mrpack、.zip（Modrinth / CurseForge / MultiMC / packwiz / 通用压缩包）
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button className="btn" style={{ flex: 1 }} onClick={() => void pickAndPreview()}>
+            选择文件
+          </button>
+          <button
+            className="btn"
+            style={{ flex: 1 }}
+            onClick={() => {
+              setImportOpen(false)
+              setLinkOpen(true)
+            }}
+          >
+            从链接导入
+          </button>
+        </div>
       </Modal>
 
       {/* 从链接导入 */}

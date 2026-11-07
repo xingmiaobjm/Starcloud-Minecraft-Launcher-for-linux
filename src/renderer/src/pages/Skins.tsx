@@ -540,13 +540,7 @@ export default function SkinsPage(props: {
             </div>
 
             {focusAccount !== undefined && focusAccount.type === 'external' && (
-              <div className="info info-info" style={{ marginTop: 12 }}>
-                <IconInfo size={14} />
-                <div className="info-body">
-                  外置（第三方）账户的皮肤由皮肤站决定，本地皮肤库对它们不生效 ——
-                  在皮肤站更换即可。
-                </div>
-              </div>
+              <StationWardrobe account={focusAccount} />
             )}
           </div>
 
@@ -789,6 +783,221 @@ export default function SkinsPage(props: {
             <Spinner />
             <div className="info-body">处理中…</div>
           </div>
+        </div>
+      )}
+      {host}
+    </div>
+  )
+}
+// ── 皮肤站衣柜（Win 0.4.0：Blessing Skin 6 OAuth2 + PKCE） ──────────────────
+
+/** BS6 衣柜条目（桥接 skins.bs6.closet 返回，字段同 Core StationSkin）。 */
+interface Bs6SkinItem {
+  Id: string
+  Name: string
+  Model: string
+  Url?: string
+  Kind: string
+}
+
+function StationWardrobe(props: { account: GameAccount }): JSX.Element {
+  const { push, host } = useToasts()
+  const [status, setStatus] = useState<{
+    root: string
+    major: number | null
+    hasTokens: boolean
+  } | null>(null)
+  const [category, setCategory] = useState<'skin' | 'cape'>('skin')
+  const [items, setItems] = useState<Bs6SkinItem[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [authBusy, setAuthBusy] = useState(false)
+  const [applying, setApplying] = useState<string | null>(null)
+
+  const loadStatus = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    try {
+      const data = await request<{
+        root: string
+        major: number | null
+        hasTokens: boolean
+      }>('skins.bs6.status', { uuid: props.account.uuid })
+      setStatus(data)
+    } catch (e) {
+      setStatus(null)
+      push('error', `皮肤站探测失败：${String(e)}`)
+    }
+    setLoading(false)
+  }, [props.account.uuid, push])
+
+  const loadCloset = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    try {
+      const data = await request<{ items: Bs6SkinItem[] }>('skins.bs6.closet', {
+        uuid: props.account.uuid,
+        category
+      })
+      setItems(data.items)
+    } catch (e) {
+      setItems(null)
+      push('error', String(e))
+    }
+    setLoading(false)
+  }, [category, props.account.uuid, push])
+
+  useEffect(() => {
+    void loadStatus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 已授权 → 直接拉衣柜；分类切换后重拉
+  useEffect(() => {
+    if (status !== null && status.hasTokens) void loadCloset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, category])
+
+  const connect = async (): Promise<void> => {
+    setAuthBusy(true)
+    try {
+      await request('skins.bs6.authorize', { uuid: props.account.uuid })
+      push('success', '皮肤站已连接')
+      const data = await request<{
+        root: string
+        major: number | null
+        hasTokens: boolean
+      }>('skins.bs6.status', { uuid: props.account.uuid })
+      setStatus(data)
+    } catch (e) {
+      push('error', `连接皮肤站失败：${String(e)}`)
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
+  const apply = async (item: Bs6SkinItem): Promise<void> => {
+    setApplying(item.Id)
+    try {
+      const r = await request<{ player: string }>('skins.bs6.apply', {
+        uuid: props.account.uuid,
+        tid: item.Id,
+        kind: item.Kind === 'cape' ? 'cape' : 'skin'
+      })
+      push('success', `已为角色「${r.player}」换上「${item.Name}」`)
+    } catch (e) {
+      push('error', String(e))
+    } finally {
+      setApplying(null)
+    }
+  }
+
+  // 非第三方 / 探测失败：不渲染（外层只在 external 账户挂载本组件）
+  if (loading && status === null) {
+    return (
+      <div className="card" style={{ marginTop: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 12 }}>
+          <span className="spinner" />
+          <span className="t-cap">正在识别皮肤站类型…</span>
+          {host}
+        </div>
+      </div>
+    )
+  }
+  if (status === null) {
+    return (
+      <div className="info info-danger" style={{ marginTop: 12 }}>
+        <div className="info-body">皮肤站类型识别失败，重进页面可重试。{host}</div>
+      </div>
+    )
+  }
+
+  // 不是 BS6：退回提示文案（老皮肤站走账号 token 接口，Linux 暂未接）
+  if (status.major === null || status.major < 6) {
+    return (
+      <div className="info info-info" style={{ marginTop: 12 }}>
+        <IconInfo size={14} />
+        <div className="info-body">
+          这个皮肤站不是 Blessing Skin 6（或暂时识别不到），衣柜接口不可用 ——
+          请到皮肤站网页更换皮肤。
+          {host}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <span style={{ width: 4, height: 16, borderRadius: 2, background: 'var(--accent)', flexShrink: 0 }} />
+        <span className="t-strong" style={{ fontSize: 15 }}>皮肤站衣柜</span>
+        <span className="t-cap truncate" style={{ flex: 1 }}>
+          {status.root}
+          {status.major !== null && ` · BS${status.major}`}
+        </span>
+        <Segmented<'skin' | 'cape'>
+          value={category}
+          options={[
+            { value: 'skin', label: '皮肤' },
+            { value: 'cape', label: '披风' }
+          ]}
+          onChange={setCategory}
+        />
+        {!status.hasTokens && (
+          <button
+            className="btn btn-primary"
+            style={{ fontWeight: 600 }}
+            disabled={authBusy}
+            onClick={() => void connect()}
+          >
+            {authBusy ? '等待授权…' : '连接皮肤站'}
+          </button>
+        )}
+        {status.hasTokens && (
+          <button className="btn btn-sm" onClick={() => void loadCloset()} disabled={loading}>
+            <IconRefresh size={14} /> 刷新
+          </button>
+        )}
+      </div>
+
+      {!status.hasTokens && (
+        <div className="t-cap" style={{ marginBottom: 8 }}>
+          点「连接皮肤站」在浏览器里授权一次（LittleSkin 一键登录），衣柜与换肤就都走它。
+        </div>
+      )}
+
+      {loading ? (
+        <SkeletonList rows={2} avatar />
+      ) : !status.hasTokens || items === null ? (
+        <div className="t-cap">授权完成后即可在这里看到衣柜。</div>
+      ) : items.length === 0 ? (
+        <div className="t-cap">衣柜里还没有{category === 'skin' ? '皮肤' : '披风'}。到皮肤站上传后点「刷新」。</div>
+      ) : (
+        <div className="skin-grid">
+          {items.map((item) => (
+            <button
+              key={item.Id}
+              className="skin-card"
+              title={item.Name}
+              disabled={applying !== null}
+              onClick={() => void apply(item)}
+            >
+              <span className="skin-card-fig">
+                {item.Url !== undefined && item.Url !== '' ? (
+                  <img
+                    src={item.Url}
+                    alt=""
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', imageRendering: 'pixelated' }}
+                  />
+                ) : (
+                  <IconUser size={22} style={{ opacity: 0.45 }} />
+                )}
+              </span>
+              <span className="t-strong truncate" style={{ fontSize: 12, maxWidth: '100%' }}>
+                {item.Name}
+              </span>
+              <span className="t-cap" style={{ fontSize: 11 }}>
+                {applying === item.Id ? '应用中…' : item.Model === 'alex' || item.Model === 'slim' ? '纤细' : '经典'}
+              </span>
+            </button>
+          ))}
         </div>
       )}
       {host}

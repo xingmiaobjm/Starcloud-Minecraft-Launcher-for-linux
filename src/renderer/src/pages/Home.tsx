@@ -106,9 +106,15 @@ function lastPlayed(iso?: string): string {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
 }
 
-/** 排序对齐 Win 端：默认版本置顶，其余按 id 倒序（忽略大小写）。 */
+/** 排序对齐 Win 0.4.0：置顶 → 收藏 → 默认版本 → id 倒序（忽略大小写）。 */
 function sortVersions(list: InstalledVersion[]): InstalledVersion[] {
   return [...list].sort((a, b) => {
+    const ap = a.pinned === true ? 1 : 0
+    const bp = b.pinned === true ? 1 : 0
+    if (ap !== bp) return bp - ap
+    const af = a.favorite === true ? 1 : 0
+    const bf = b.favorite === true ? 1 : 0
+    if (af !== bf) return bf - af
     const aLast = a.isDefault === true ? 1 : 0
     const bLast = b.isDefault === true ? 1 : 0
     if (aLast !== bLast) return bLast - aLast
@@ -139,6 +145,8 @@ export default function HomePage(props: {
   const [loading, setLoading] = useState(true)
   const [gameDir, setGameDir] = useState('')
   const [avatarFailed, setAvatarFailed] = useState(false)
+  /** 右键菜单当前指向的版本（置顶/收藏按它切换，与 Win VersionMenu_Opening 同口径） */
+  const [menuRow, setMenuRow] = useState<string | undefined>()
 
   async function reload(): Promise<void> {
     setLoading(true)
@@ -152,6 +160,10 @@ export default function HomePage(props: {
     } catch (e) {
       setError(String(e))
     }
+    try {
+      const settings = await request<{ gameDir: string }>('settings.get')
+      setGameDir(settings.gameDir)
+    } catch { /* 读取失败不阻塞主流程 */ }
     try {
       const list = await request<AccountList>('accounts.list')
       setAccounts(list.accounts)
@@ -168,11 +180,6 @@ export default function HomePage(props: {
     } catch (e) {
       setError(String(e))
     }
-    // 启动自检还需要游戏目录与 Java（Win 端 LeftNoticeArea）
-    try {
-      const settings = await request<{ gameDir: string }>('settings.get')
-      setGameDir(settings.gameDir)
-    } catch { /* 读取失败不阻塞主流程 */ }
     setLoading(false)
   }
 
@@ -198,6 +205,21 @@ export default function HomePage(props: {
   const canLaunch =
     !session.launching && !running && selected !== undefined && account !== undefined
 
+  /** 置顶 / 收藏开关（Win ToggleVersionFlag 同款：写实例档案后本地重排） */
+  function toggleMark(id: string | undefined, key: 'pinned' | 'favorite'): void {
+    if (id === undefined) return
+    const current = installed.find((v) => v.id === id)
+    const nextValue = !(current?.[key] === true)
+    // 乐观更新，失败回滚靠 reload
+    setInstalled((prev) =>
+      sortVersions(prev.map((v) => (v.id === id ? { ...v, [key]: nextValue } : v)))
+    )
+    void request('versions.setMarks', { versionId: id, [key]: nextValue }).catch((e) => {
+      push('error', String(e))
+      void reload()
+    })
+  }
+
   const menu = useContextMenu([
     { label: '问 Nova', onSelect: () => props.onNavigate('nova') },
     { label: '版本详情', onSelect: () => props.onNavigate('versions') },
@@ -209,6 +231,18 @@ export default function HomePage(props: {
           push('error', String(e))
         )
       }
+    },
+    {
+      label: menuRow !== undefined && installed.find((v) => v.id === menuRow)?.pinned === true
+        ? '取消置顶'
+        : '置顶',
+      onSelect: () => toggleMark(menuRow, 'pinned')
+    },
+    {
+      label: menuRow !== undefined && installed.find((v) => v.id === menuRow)?.favorite === true
+        ? '取消收藏'
+        : '收藏',
+      onSelect: () => toggleMark(menuRow, 'favorite')
     },
     {
       label: '删除此版本',
@@ -287,7 +321,13 @@ export default function HomePage(props: {
                   const isSelected = version.id === selected
                   const icon = iconFor(version)
                   return (
-                    <div key={version.id} {...menu.bind()}>
+                    <div
+                      key={version.id}
+                      onContextMenu={(e) => {
+                        setMenuRow(version.id)
+                        menu.bind().onContextMenu(e)
+                      }}
+                    >
                       <div
                         className={`row${isSelected ? ' row-active' : ''}`}
                         style={{
@@ -495,7 +535,7 @@ export default function HomePage(props: {
           </div>
         </div>
 
-        {/* 运行日志不放在首页        {/* 运行日志不放在首页：Win 端首页没有日志区，且启动时日志卡出现会挤压
+        {/* 运行日志不放在首页：Win 端首页没有日志区，且启动时日志卡出现会挤压
             两栏布局（用户看到账户卡被"拉大"）。日志在「运行状态 / 启动器日志」页。 */}
 
         {error !== '' && (

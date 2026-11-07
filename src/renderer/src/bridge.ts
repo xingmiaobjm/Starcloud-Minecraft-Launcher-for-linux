@@ -24,6 +24,14 @@ export interface InstalledVersion {
   inheritsFrom?: string
   modLoader?: string
   isModded?: boolean
+  /** 收藏标记（实例档案，Win 0.4.0 主页版本卡同款） */
+  favorite?: boolean
+  /** 置顶标记（实例档案） */
+  pinned?: boolean
+  /** 累计游玩秒数（游戏正常退出 ≥ 30 秒才入账） */
+  playSeconds?: number
+  /** 自定义图标路径（空 = 用默认类型图标） */
+  iconPath?: string
 }
 
 export interface GameAccount {
@@ -371,6 +379,16 @@ export interface SettingsSnapshot {
   deviceLinkEnabled: boolean
   deviceName: string
   p2pDownloadEnabled: boolean
+  /** 公网传递优化（利用闲置带宽加速其他用户，默认关） */
+  p2pInternetEnabled: boolean
+  /** 公网传递优化的最大上传速度（1-32 Mbps） */
+  p2pInternetUploadMbps: number
+  /** 局域网 P2P 是否接受其他 Starcloud ID 用户的设备（Win 0.3.9 新增，默认开） */
+  deviceP2pCrossAccount: boolean
+  /** 正版登录令牌加密落盘（Win 0.3.9 新增，默认开） */
+  microsoftTokenPersist: boolean
+  /** 主页版本列表内容：installed / favorites / pinned（Win 0.4.0 新增） */
+  homeVersionCardMode: string
   autoUpdateEnabled: boolean
   updateManifestUrl: string
 }
@@ -427,6 +445,8 @@ export interface NativeApi {
     defaultName: string,
     filters?: Array<{ name: string; extensions: string[] }>
   ) => Promise<string | null>
+  /** 拖拽进来的 File 对象换成本地路径（Electron 32+ 移除了 File.path）。 */
+  getPathForFile: (file: File) => string
 }
 
 /** preload 未注入时（浏览器调试）返回 null，相关功能退化为提示。 */

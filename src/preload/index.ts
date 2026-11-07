@@ -1,6 +1,6 @@
 /// preload：把 C# 桥接 + 窗口控制 + 主题通知安全地暴露给渲染层。
 /// contextIsolation 保持开启，渲染层拿不到 Node/Electron 原始对象。
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 /** C# 桥接（行式 JSON over stdio）。 */
 const bridge = {
@@ -65,7 +65,9 @@ const native = {
     defaultName: string,
     filters?: Array<{ name: string; extensions: string[] }>
   ): Promise<string | null> =>
-    ipcRenderer.invoke('dialog:pickSaveFile', title, defaultName, filters ?? [])
+    ipcRenderer.invoke('dialog:pickSaveFile', title, defaultName, filters ?? []),
+  /** 拖拽进来的 File 对象换成本地路径（Electron 32+ 移除了 File.path）。 */
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file)
 }
 
 const appEvents = {
