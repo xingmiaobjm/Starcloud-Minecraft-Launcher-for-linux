@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "electron-vite preview",
     "package": "electron-vite build && electron-builder --config electron-builder.yml --linux",
+    "package:appimage": "electron-vite build && electron-builder --config electron-builder.yml --linux AppImage",
+    "package:deb": "electron-vite build && electron-builder --config electron-builder.yml --linux deb",
     "package:dir": "electron-vite build && electron-builder --config electron-builder.yml --linux --dir",
     "dev:web": "vite --port 5173 --open"
   },

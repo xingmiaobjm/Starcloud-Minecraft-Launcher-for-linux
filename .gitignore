@@ -7,6 +7,7 @@ dist/
 bridge-linux-x64/
 bridge-win-x64/
 bridge-osx-x64/
+.makepkg/
 
 # 编辑器 / 系统
 .DS_Store
@@ -27,3 +28,12 @@ tools/output/
 .copilot/
 .aider*
 .specstory/
+
+# makepkg 构建产物
+packaging/aur/src/
+packaging/aur/pkg/
+packaging/aur/*.pkg.tar.zst
+packaging/aur/*.pkg.tar.zst.sig
+
+# AI 工具本地文件
+.marscode/

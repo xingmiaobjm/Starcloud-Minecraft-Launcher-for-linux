@@ -1,0 +1,55 @@
+# Maintainer: Starcloud <dev@starcloud.local>
+
+pkgname=starcloud-launcher-bin
+
+# ===== 发新版只需改这两行 =====
+pkgver=0.3.8_beta.8          # pacman 版本号：连字符必须换成下划线
+_tag="v0.3.8-beta.8"         # GitHub release 的 tag，保留原始连字符和 v 前缀
+# =============================
+
+pkgrel=1
+pkgdesc="Starcloud Minecraft Launcher (Electron + Fluent UI React)"
+arch=('x86_64')
+url="https://github.com/xingmiaobjm/Starcloud-Minecraft-Launcher-for-linux"
+license=('AGPL-3.0-only')
+depends=(
+  'gtk3'
+  'nss'
+  'libxss'
+  'libxtst'
+  'xdg-utils'
+  'at-spi2-core'
+  'libsecret'
+)
+provides=('starcloud-launcher')
+conflicts=('starcloud-launcher')
+options=('!strip' '!debug')
+
+# release asset 的原始文件名：去掉 _tag 的 v 前缀
+_release_ver="${_tag#v}"
+_asset="starcloud-launcher-linux-${_release_ver}.AppImage"
+
+source=("starcloud-launcher-${pkgver}.AppImage::${url}/releases/download/${_tag}/${_asset}")
+sha256sums=('SKIP')
+
+package() {
+  install -Dm755 "$srcdir/starcloud-launcher-${pkgver}.AppImage" \
+    "$pkgdir/opt/starcloud-launcher/starcloud-launcher.AppImage"
+
+  install -d "$pkgdir/usr/share/applications"
+  cat > "$pkgdir/usr/share/applications/starcloud-launcher.desktop" <<EOF
+[Desktop Entry]
+Name=Starcloud Launcher
+Comment=Starcloud Minecraft Launcher
+Exec=/opt/starcloud-launcher/starcloud-launcher.AppImage %U
+Terminal=false
+Type=Application
+Icon=starcloud-launcher
+Categories=Game;
+MimeType=x-scheme-handler/starcloud;
+EOF
+
+  install -d "$pkgdir/usr/bin"
+  ln -s /opt/starcloud-launcher/starcloud-launcher.AppImage \
+    "$pkgdir/usr/bin/starcloud-launcher"
+}
