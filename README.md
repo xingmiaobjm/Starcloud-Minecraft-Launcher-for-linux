@@ -2,6 +2,7 @@
 
 Starcloud Minecraft 启动器的 **Linux 端**（Electron + React + TypeScript）。
 界面按 WinUI 3 / Fluent Design 规范实现，运行在 Linux（X11 优先，Wayland 有已知问题）。
+功能面对齐 Win 端 0.4.0（下载 / 启动 / 账户 / 好友与群聊 / 联机 / Nova / 实验室 / 皮肤站衣柜 …）。
 
 > 内核（下载 / 安装 / 启动 / 账户 / 联机 / Nova …）在 C# 侧实现，本仓库通过
 > `Starcloud.Bridge` 进程复用，**不重写一份 TS 后端**。
@@ -29,6 +30,30 @@ npm run package        # deb + AppImage → release/
 ELECTRON_DISABLE_SANDBOX=1 npm run dev
 ```
 
+## 功能总览
+
+导航页与能力（与 Win 端 0.4.0 一一对应）：
+
+- **首页**：版本列表（右键菜单：问 Nova / 置顶 / 收藏 / 删除 …）、账户卡与启动
+- **版本**：17 项右键操作（启动 / 文件夹 / 重命名 / 复制 / 导出·导入整合包 / 备份回档 …），
+  整合包导入为方式选择弹窗（拖入文件 / 选择文件 / 从链接导入）
+- **下载**：原版 / Mod / 整合包 / 数据包 / 资源包 / 光影，中文搜索翻译与一键安装
+- **存档**：列表 / 备份 / 回档 / 复制到其他版本 / 分享包导入导出
+- **好友**：申请与联机邀请、QQ 式两栏聊天、**群聊与文件传输**（图片 / 视频 / 文件气泡，
+  实时推送 + 20s 轮询兜底）、创建群 / 群成员管理
+- **实验室**：投影工坊（.litematic / 世吞模板）、彩色文字
+- **投影管理**：全局与各版本投影扫描 / 复制 / 移动 / 删除
+- **运行状态**：运行卡、CPU / 内存 / 显卡实时曲线、启动配置与 JVM、实时日志、采样设置
+- **账户**：正版 / 外置 / 离线，账户详情内嵌**本地皮肤库**（3D 小人）与
+  **皮肤站衣柜**（Blessing Skin 6：浏览器 OAuth 授权 → 皮肤 / 披风一键换装）
+- **插件**：.mclplug 安装 / 启停 / 面板
+- **Nova**：云端模型（Starcloud ID）或自接 OpenAI 兼容服务、游戏内浮窗、计划执行
+- **设置**：游戏 / Java / 下载与资源 / 通用（主页版本列表、动效、背景）/ 跨设备
+  （存档同步、传递优化、令牌加密）
+
+暂未跟进而 Win 端已在开发分支（`feature/home-grid-and-perf`）的能力：游玩时长统计、
+主页可编辑网格、7z / rar / tar.gz 整合包容器 —— 等该分支合入 main 后随桥接补齐。
+
 ## 桥接（Starcloud.Bridge）
 
 界面本身可独立运行（缺桥接时会显示空列表并报「桥接进程未运行」），
@@ -51,6 +76,12 @@ STARCLOUD_CLONE=1 ./scripts/fetch-bridge.sh
 STARCLOUD_BRIDGE_DLL=/abs/path/Starcloud.Bridge.dll npm run dev
 ```
 
+桥接以 stdio 行式 JSON 暴露约 140 个方法（`catalog.*` / `versions.*` / `launch.*` /
+`runtime.*` / `friends.*`（含群聊与文件上传下载）/ `skins.*`（本地库 + BS6 衣柜）/
+`saves.*` / `content.*` / `plugins.*` / `nova.*` / `lab.*` / `settings.*` …），
+好友实时事件由桥接内建 SSE 循环转发为 `friends.event`；长任务走 `install.*` /
+`modpack.progress` 等事件流。界面（`bridge.ts`）只做 DTO 映射，不重写后端逻辑。
+
 ## 工程结构
 
 ```
@@ -68,7 +99,7 @@ src/
       winui.css        WinUI 3 视觉层（令牌、材质、控件、动效）
       bridge.ts        桥接客户端（浏览器调试时自动降级为 mock）
       ui.tsx           共用原子（Modal / Toast / Segmented / 右键菜单 …）
-      pages/           13 个页面
+      pages/           18 个页面（含好友群聊、皮肤站衣柜、联机板块等子页）
       assets/          HarmonyOS Icons 字体、Inter、MC-Icons、品牌 SVG
 tools/                 取证与截图脚本（非运行时依赖）
 ```
@@ -144,6 +175,20 @@ npm run package:dir    # 只出未压缩目录，便于排查
 
 - `starcloud-launcher-linux_x.y.z_amd64.deb`
 - `Starcloud Launcher-x.y.z.AppImage`
+
+## 提交规范
+
+与主仓库一致的 conventional commits：`type(scope): 中文主题`，正文中文、一段话说清动机与验证。
+
+常用 type：`feat` / `fix` / `perf` / `docs` / `chore` / `refactor` / `test`。
+scope 按模块取：`home` / `versions` / `download` / `saves` / `friends`（群聊/文件传输）/
+`lab` / `projections` / `running` / `accounts` / `skins` / `plugins` / `nova` / `settings` /
+`logs` / `bridge`（与 C# 桥接的契约变化）/ `titlebar` / `theme`。
+
+示例：`feat(friends): 群聊与附件气泡，实时事件替代轮询兜底`。
+
+历史说明：`main` 上 2026-11-08 之前的提交未采用该格式（沿用早期的自由格式），
+不做重写；自本文件起统一执行。
 
 ## 许可
 
