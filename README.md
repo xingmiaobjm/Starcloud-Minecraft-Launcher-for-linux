@@ -176,6 +176,20 @@ npm run package:dir    # 只出未压缩目录，便于排查
 - `starcloud-launcher-linux_x.y.z_amd64.deb`
 - `Starcloud Launcher-x.y.z.AppImage`
 
+## 提交规范
+
+与主仓库一致的 conventional commits：`type(scope): 中文主题`，正文中文、一段话说清动机与验证。
+
+常用 type：`feat` / `fix` / `perf` / `docs` / `chore` / `refactor` / `test`。
+scope 按模块取：`home` / `versions` / `download` / `saves` / `friends`（群聊/文件传输）/
+`lab` / `projections` / `running` / `accounts` / `skins` / `plugins` / `nova` / `settings` /
+`logs` / `bridge`（与 C# 桥接的契约变化）/ `titlebar` / `theme`。
+
+示例：`feat(friends): 群聊与附件气泡，实时事件替代轮询兜底`。
+
+历史说明：`main` 上 2026-11-08 之前的提交未采用该格式（沿用早期的自由格式），
+不做重写；自本文件起统一执行。
+
 ## 许可
 
 AGPL-3.0，见 [LICENSE](./LICENSE)。
