@@ -283,6 +283,9 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
   const [groupHasMore, setGroupHasMore] = useState(false)
   const [groupNextBeforeId, setGroupNextBeforeId] = useState<number | undefined>(undefined)
   const [groupDetail, setGroupDetail] = useState<ScGroupDetail | null>(null)
+  // 服务器还没有群接口时置真：轮询跳过 friends.groups，避免每 20s 刷一遍错误
+  // （整页刷新 / 重新登录时重置，服务器上线后自动恢复）。
+  const groupsUnavailableRef = useRef(false)
   const [groupMembersOpen, setGroupMembersOpen] = useState(false)
   const [createGroupOpen, setCreateGroupOpen] = useState(false)
   const [attachBusy, setAttachBusy] = useState(false)
@@ -355,6 +358,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
 
   /** 群列表（unread 随行返回）；最后一条消息按需补拉，拉过就缓存。 */
   const refreshGroups = useCallback(async (): Promise<void> => {
+    if (groupsUnavailableRef.current) return
     try {
       const data = await request<{ groups: ScGroupSummary[] }>('friends.groups')
       setGroups(data.groups)
@@ -376,10 +380,12 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
         )
         setGroupLast((prev) => ({ ...prev, ...patch }))
       }
-    } catch {
+    } catch (e) {
       // 群接口暂不可用（服务器未上线 / 未登录）时静默降级：
       // 好友聊天不受影响，群会话行不出现（服务器上线后自动恢复）。
+      // 「未找到接口」（服务器 404）还会置闩锁，轮询不再反复调用。
       setGroups([])
+      if (String(e).includes('未找到接口')) groupsUnavailableRef.current = true
     }
   }, [groupLast])
 
@@ -390,6 +396,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
       setLoaded(true)
       return
     }
+    groupsUnavailableRef.current = false
     await Promise.all([refreshFriends(), refreshCounts(), refreshGroups()])
     setLoaded(true)
   }, [refreshCounts, refreshFriends, refreshGroups])
