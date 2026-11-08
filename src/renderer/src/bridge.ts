@@ -387,6 +387,8 @@ export interface SettingsSnapshot {
   deviceP2pCrossAccount: boolean
   /** 正版登录令牌加密落盘（Win 0.3.9 新增，默认开） */
   microsoftTokenPersist: boolean
+  /** 更新发布渠道：release / public-beta（Win 0.4.0-beta.1） */
+  releaseChannel: string
   /** 主页版本列表内容：installed / favorites / pinned（Win 0.4.0 新增） */
   homeVersionCardMode: string
   autoUpdateEnabled: boolean

@@ -469,16 +469,19 @@ export default function VersionsPage(props: {
     }
     setImportOpen(false)
     const path = await nat.pickFile('选择整合包', [
-      { name: '整合包（.mrpack / .zip）', extensions: ['mrpack', 'zip'] }
+      {
+        name: '整合包（.mrpack / .zip / .7z / .rar / .tar.gz）',
+        extensions: ['mrpack', 'zip', '7z', 'rar', 'gz']
+      }
     ])
     if (path === null) return
     await previewPack(path)
   }
 
-  /** 拖入文件 → 换本地路径 → 预览（Win ImportPackDialog.Drop 同款过滤：.mrpack / .zip） */
+  /** 拖入文件 → 换本地路径 → 预览（Win 0.4.x：.mrpack / .zip / .7z / .rar / .tar.gz） */
   function handlePackDrop(e: React.DragEvent): void {
     e.preventDefault()
-    const file = [...e.dataTransfer.files].find((f) => /\.(mrpack|zip)$/i.test(f.name))
+    const file = [...e.dataTransfer.files].find((f) => /\.(mrpack|zip|7z|rar|gz)$/i.test(f.name))
     if (file === undefined) return
     const path = nat?.getPathForFile(file) ?? ''
     if (path === '') {
@@ -1081,7 +1084,7 @@ export default function VersionsPage(props: {
         >
           <div style={{ fontSize: 14, color: 'var(--text-primary)' }}>把整合包拖到这里</div>
           <div className="t-cap" style={{ marginTop: 4 }}>
-            支持 .mrpack、.zip（Modrinth / CurseForge / MultiMC / packwiz / 通用压缩包）
+            支持 .mrpack、.zip、.7z、.rar、.tar.gz（Modrinth / CurseForge / MultiMC / packwiz / 通用压缩包）
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
