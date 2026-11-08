@@ -124,6 +124,14 @@ function sortVersions(list: InstalledVersion[]): InstalledVersion[] {
   })
 }
 
+/** 游玩时长文案（累计秒数 → X 小时 / Y 分钟；不足 1 分钟不显示）。 */
+function fmtPlay(seconds?: number): string | null {
+  if (seconds === undefined || seconds < 60) return null
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} 分钟`
+  return `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`
+}
+
 function fmtSize(bytes: number): string {
   if (!bytes) return '未完成'
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -145,6 +153,8 @@ export default function HomePage(props: {
   const [loading, setLoading] = useState(true)
   const [gameDir, setGameDir] = useState('')
   const [avatarFailed, setAvatarFailed] = useState(false)
+  /** 主页版本列表内容（Win 0.4.x：installed / favorites / pinned，设置 → 主页版本列表） */
+  const [cardMode, setCardMode] = useState<'installed' | 'favorites' | 'pinned'>('installed')
   /** 右键菜单当前指向的版本（置顶/收藏按它切换，与 Win VersionMenu_Opening 同口径） */
   const [menuRow, setMenuRow] = useState<string | undefined>()
 
@@ -161,8 +171,17 @@ export default function HomePage(props: {
       setError(String(e))
     }
     try {
-      const settings = await request<{ gameDir: string }>('settings.get')
+      const settings = await request<{
+        gameDir: string
+        homeVersionCardMode?: string
+      }>('settings.get')
       setGameDir(settings.gameDir)
+      if (
+        settings.homeVersionCardMode === 'favorites' ||
+        settings.homeVersionCardMode === 'pinned'
+      ) {
+        setCardMode(settings.homeVersionCardMode)
+      }
     } catch { /* 读取失败不阻塞主流程 */ }
     try {
       const list = await request<AccountList>('accounts.list')
@@ -260,6 +279,20 @@ export default function HomePage(props: {
     }
   ])
 
+  /** 按设置过滤主页列表（installed / favorites / pinned）。 */
+  const visibleVersions = installed.filter((v) =>
+    cardMode === 'favorites'
+      ? v.favorite === true
+      : cardMode === 'pinned'
+        ? v.pinned === true
+        : true
+  )
+  const CARD_TITLE: Record<typeof cardMode, string> = {
+    installed: '已安装版本',
+    favorites: '收藏版本',
+    pinned: '置顶版本'
+  }
+
   const statusColor = running
     ? 'var(--success)'
     : session.launching
@@ -281,8 +314,8 @@ export default function HomePage(props: {
             {/* 启动自检卡片已移除：Win 端首页只在必要时短暂提示，不常驻占位 */}
             <div className="card card-flush" style={{ flex: 1, minHeight: 0 }}>
               <div className="card-head">
-                <span className="card-title">已安装版本</span>
-                <span className="chip">{installed.length}</span>
+                <span className="card-title">{CARD_TITLE[cardMode]}</span>
+                <span className="chip">{visibleVersions.length}</span>
                 <div style={{ flex: 1 }} />
                 <button
                   className="btn btn-subtle btn-sm"
@@ -302,7 +335,7 @@ export default function HomePage(props: {
                 {loading && (
                   <div style={{ padding: 20, textAlign: 'center', opacity: 0.6 }}>加载中…</div>
                 )}
-                {!loading && installed.length === 0 && (
+                {!loading && visibleVersions.length === 0 && cardMode === 'installed' && (
                   <div className="empty">
                     <div className="empty-title">还没有已安装的版本</div>
                     <div className="empty-hint">
@@ -317,7 +350,23 @@ export default function HomePage(props: {
                     </button>
                   </div>
                 )}
-                {installed.map((version, index) => {
+                {!loading && visibleVersions.length === 0 && cardMode !== 'installed' && (
+                  <div className="empty">
+                    <div className="empty-title">
+                      {cardMode === 'favorites' ? '还没有收藏的版本' : '还没有置顶的版本'}
+                    </div>
+                    <div className="empty-hint">
+                      在版本列表里右键一个版本，选「{cardMode === 'favorites' ? '收藏' : '置顶'}」即可标记。
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => props.onNavigate('versions')}
+                    >
+                      去版本页标记
+                    </button>
+                  </div>
+                )}
+                {visibleVersions.map((version, index) => {
                   const isSelected = version.id === selected
                   const icon = iconFor(version)
                   return (
@@ -354,6 +403,12 @@ export default function HomePage(props: {
                           <span className="meta-v">{lastPlayed(version.lastPlayedAt)}</span>
                           <span className="meta-k">大小</span>
                           <span className="meta-v">{fmtSize(version.sizeBytes)}</span>
+                          {fmtPlay(version.playSeconds) !== null && (
+                            <>
+                              <span className="meta-k">时长</span>
+                              <span className="meta-v">{fmtPlay(version.playSeconds)}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -21,7 +21,7 @@ import type {
   ScGroupSummary,
   ScSession
 } from '../bridge-friends'
-import { parseFileAttachment } from '../bridge-friends'
+import { parseFileAttachment, parseRoomInvite } from '../bridge-friends'
 import MultiplayerPage from './Multiplayer'
 import { EmptyState, InfoBar, Modal, Segmented, Select, useToasts, type ToastKind } from '../ui'
 import { IconMore, IconPlus, IconSearch } from '../icons'
@@ -1039,6 +1039,15 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                     }))}
                     meId={session?.userId ?? ''}
                     myInitial={initialOf(session?.displayName ?? '', session?.userId ?? '')}
+                    peerAvatar={selectedFriend.avatar_url ?? null}
+                    onJoinRoom={(code) => {
+                      void request('multiplayer.join', { room: code })
+                        .then(() => {
+                          push('success', '正在连接房间…进入游戏后到「联机」即可看到对方世界。')
+                          setSection('multiplayer')
+                        })
+                        .catch((e) => push('error', `进房失败：${String(e)}`))
+                    }}
                   />
                 </div>
 
@@ -1168,8 +1177,12 @@ function ChatRows(props: {
   meId: string
   /** 好友聊天：自己的头像首字母（昵称优先，与原实现一致）。 */
   myInitial?: string
+  /** 好友聊天：对方的远程头像 URL（Win 0.4.0-beta.1 聊天头像）。 */
+  peerAvatar?: string | null
   /** 群聊回调：下载附件。 */
   onDownload?: (a: ScFileAttachment) => void
+  /** 房卡消息一键进房（有此回调才把 [联机邀请] 渲染成卡片）。 */
+  onJoinRoom?: (code: string) => void
 }): JSX.Element {
   const nodes: JSX.Element[] = []
   let previous: Date | null = null
@@ -1188,10 +1201,44 @@ function ChatRows(props: {
     const isGroup = props.onDownload !== undefined
     const initial =
       mine && !isGroup && props.myInitial !== undefined ? props.myInitial : initialOf(line.fromId, line.fromId)
+    const avatar = !mine && !isGroup && props.peerAvatar ? (
+      <img
+        src={props.peerAvatar}
+        alt=""
+        width={28}
+        height={28}
+        style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+      />
+    ) : null
+    const roomInvite = parseRoomInvite(line.content)
     nodes.push(
       <div key={line.key} className={`fr-msg${mine ? ' fr-msg-mine' : ''}`}>
-        <span className="fr-avatar fr-avatar-sm">{initial}</span>
-        {attachment !== null ? (
+        <span className="fr-avatar fr-avatar-sm" style={avatar ? { overflow: 'visible', background: 'none' } : undefined}>
+          {avatar ?? initial}
+        </span>
+        {roomInvite !== null ? (
+          <span className={`fr-bubble fr-roomcard${mine ? ' fr-bubble-mine' : ''}`}>
+            <span className="fr-file-info" style={{ minWidth: 0 }}>
+              <span className="fr-file-name truncate" style={{ display: 'block' }}>
+                {roomInvite.name ? `邀请你加入「${roomInvite.name}」` : '邀请你加入联机房间'}
+              </span>
+              <span className="fr-file-meta">
+                房间码 {roomInvite.code}
+                {roomInvite.mc ? ` · ${roomInvite.mc}` : ''}
+                {roomInvite.loader ? ` · ${roomInvite.loader}` : ''}
+              </span>
+            </span>
+            {props.onJoinRoom !== undefined && (
+              <button
+                className="btn btn-primary btn-sm"
+                style={{ flexShrink: 0, fontWeight: 600 }}
+                onClick={() => props.onJoinRoom?.(roomInvite.code)}
+              >
+                加入房间
+              </button>
+            )}
+          </span>
+        ) : attachment !== null ? (
           <span className={`fr-bubble fr-file-bubble${mine ? ' fr-bubble-mine' : ''}`}>
             <span className="fr-file-info" style={{ minWidth: 0 }}>
               <span className="fr-file-name truncate" style={{ display: 'block' }}>

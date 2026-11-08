@@ -145,6 +145,7 @@ const EMPTY: SettingsSnapshot = {
   deviceP2pCrossAccount: true,
   microsoftTokenPersist: true,
   homeVersionCardMode: 'installed',
+  releaseChannel: 'release',
   autoUpdateEnabled: true,
   updateManifestUrl: ''
 }
@@ -833,6 +834,20 @@ export default function SettingsPage(props: {
                     checked={s.autoUpdateEnabled}
                     onChange={(v) => set('autoUpdateEnabled', v)}
                     label="自动检查更新"
+                  />
+                </Field>
+                <Field
+                  label="发布渠道"
+                  hint="公测版更新更频繁，可提前体验新功能；可能不稳定"
+                >
+                  <Select
+                    width={240}
+                    value={s.releaseChannel}
+                    options={[
+                      { value: 'release', label: '正式版' },
+                      { value: 'public-beta', label: '公测版' }
+                    ]}
+                    onChange={(v) => set('releaseChannel', v)}
                   />
                 </Field>
                 <button className="btn" disabled={checkingUpdate} onClick={() => void checkUpdate()}>

@@ -136,3 +136,25 @@ export function parseFileAttachment(content: string | undefined): ScFileAttachme
     return null
   }
 }
+
+/** 房卡（联机邀请）载荷：消息文本 = [联机邀请] 前缀 + 该结构的 JSON。 */
+export interface ScRoomInvitePayload {
+  code: string
+  name?: string
+  mc?: string
+  loader?: string
+  owner?: string
+}
+
+export const ROOM_INVITE_PREFIX = '[联机邀请]'
+
+/** 解析房卡消息（Core TryParseRoomInviteMessage 同口径；非房卡返回 null）。 */
+export function parseRoomInvite(content: string | undefined): ScRoomInvitePayload | null {
+  if (content === undefined || !content.startsWith(ROOM_INVITE_PREFIX)) return null
+  try {
+    const p = JSON.parse(content.slice(ROOM_INVITE_PREFIX.length)) as ScRoomInvitePayload
+    return p.code !== '' ? p : null
+  } catch {
+    return null
+  }
+}
