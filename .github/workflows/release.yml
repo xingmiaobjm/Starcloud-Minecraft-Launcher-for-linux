@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要重新构建的已有标签 (例如 v0.3.8-beta.8)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install system dependencies for fpm/deb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ruby \
+            ruby-dev \
+            build-essential \
+            rpm \
+            bsdtar \
+            libarchive-tools \
+            zlib1g-dev
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Fetch C# bridge
+        run: ./scripts/fetch-bridge.sh
+        
+      - name: Build AppImage + deb
+        run: npm run package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Locate build artifacts
+        id: artifacts
+        run: |
+          APPIMAGE=$(ls release/*.AppImage | head -n1)
+          DEB=$(ls release/*.deb | head -n1)
+          echo "appimage=${APPIMAGE}" >> $GITHUB_OUTPUT
+          echo "deb=${DEB}" >> $GITHUB_OUTPUT
+          echo "appimage_name=$(basename ${APPIMAGE})" >> $GITHUB_OUTPUT
+          echo "deb_name=$(basename ${DEB})" >> $GITHUB_OUTPUT
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            ${{ steps.artifacts.outputs.appimage }}
+            ${{ steps.artifacts.outputs.deb }}
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
