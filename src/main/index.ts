@@ -17,14 +17,22 @@
 ///    内容区用纯色分层；并提供 `--no-blur` 降级开关（见 renderer 的 blur 开关）。
 /// 5. **root 用户 / 容器无沙箱**：Chromium 沙箱不可用，需显式 `--no-sandbox`
 ///    （由 ELECTRON_DISABLE_SANDBOX=1 环境变量控制）。
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
+
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, screen, shell, Tray, Menu, nativeImage } from 'electron'
 import { hideOverlay, overlayClicked, setOverlayOpenHandler, showOverlay } from './overlay'
 import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import * as readline from 'node:readline'
 import * as path from 'node:path'
 
-const LAUNCHER_VERSION = '0.3.8-beta.8'
+const pkgPath = path.join(app.getAppPath(), 'package.json')
+let LAUNCHER_VERSION = 'unknown'
+try {
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+  LAUNCHER_VERSION = pkg.version
+} catch (e) {
+  console.error('读取 package.json 版本失败', e)
+}
 const isDev = !app.isPackaged
 
 // ── C# 桥接进程 ───────────────────────────────────────────────────────────
@@ -39,7 +47,9 @@ let mainWindow: BrowserWindow | null = null
 let restartCount = 0
 /** 应用正在退出，桥接退出属于预期，不再重启。 */
 let shuttingDown = false
-
+let tray: Tray | null = null
+/** 标记是否真正退出程序，用于区分“关闭窗口隐藏到托盘”和“退出程序” */
+let isQuiting = false
 function bridgeCandidates(): string[] {
   const env = process.env.STARCLOUD_BRIDGE_DLL
   const candidates: string[] = []
@@ -152,6 +162,11 @@ function createWindow(): BrowserWindow {
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (devUrl) win.loadURL(devUrl)
   else win.loadFile(path.join(__dirname, '../renderer/index.html'))
+
+  win.on('close',(event)=>{ if (!isQuiting) {
+      event.preventDefault()
+      win.hide()
+    }})
 
   // 坑点 2：内容渲染完再显示，避免透明/未布局时闪一帧
   win.once('ready-to-show', () => win.show())
@@ -281,7 +296,58 @@ const IMAGE_MIME: Record<string, string> = {
   '.gif': 'image/gif',
   '.webp': 'image/webp'
 }
+function createTray(): void {
+  // 由于打包和开发环境的路径差异，优先用 mainWindow 的 icon 路径逻辑
+  // 在开发环境，图标在 build/icon.png；在打包环境，在 resources/build/icon.png（取决于 extraResources 配置）
+  const iconPath = isDev 
+    ? path.join(__dirname, '../../build/icon.png')
+    : path.join(process.resourcesPath, 'build/icon.png')
 
+  let trayIcon = nativeImage.createFromPath(iconPath)
+  
+  // Linux 下托盘图标过大会显示异常，适当缩小至 24x24 或 22x22
+  if (process.platform === 'linux') {
+    trayIcon = trayIcon.resize({ width: 22, height: 22 })
+  }
+
+  tray = new Tray(trayIcon)
+  tray.setToolTip('Starcloud Launcher')
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '显示主界面',
+      click: () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          mainWindow.show()
+          mainWindow.focus()
+        }
+      }
+    },
+    {
+      label: '退出',
+      click: () => {
+        isQuiting = true
+        app.quit()
+      }
+    }
+  ])
+
+  tray.setContextMenu(contextMenu)
+
+  // 双击/单击托盘图标显示窗口（Linux 下行为依赖桌面环境）
+  tray.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+        mainWindow.hide()
+      } else {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    }
+  })
+}
 function registerIpc(): void {
   ipcMain.handle('bridge:request', (_e, method: string, params: unknown) =>
     bridgeRequest(method, params)
@@ -442,7 +508,10 @@ if (process.env.ELECTRON_DISABLE_SANDBOX === '1') {
   app.commandLine.appendSwitch('disable-gpu-sandbox')
   app.commandLine.appendSwitch('disable-dev-shm-usage')
 }
-
+app.commandLine.appendSwitch('enable-lcd-text') 
+app.commandLine.appendSwitch('force-color-profile', 'srgb')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('enable-gpu-rasterization')
 app.whenReady().then(() => {
   // 主题跟随系统（约束 2）：显式置 system，避免 GTK/portal 推断差异
   nativeTheme.themeSource = 'system'
@@ -454,7 +523,7 @@ app.whenReady().then(() => {
 
   registerIpc()
   mainWindow = createWindow()
-
+  createTray()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()
   })
@@ -462,6 +531,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   shuttingDown = true
+  isQuiting = true
   bridgeProc?.kill()
   app.quit()
+})
+app.on('before-quit', () => {
+  isQuiting = true
 })
