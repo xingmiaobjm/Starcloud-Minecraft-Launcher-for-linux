@@ -1,6 +1,6 @@
 /// 应用级游戏会话状态（跨页面存活，防双开、保留日志）。
 import { useEffect, useRef, useState } from 'react'
-import { onBridgeEvent } from '../bridge'
+import { onBridgeEvent, request } from '../bridge'
 
 export interface SessionStore {
   /** 桥接侧会话 id（game.kill 需要它；pid 是系统进程号）。 */
@@ -29,6 +29,8 @@ export interface GameSessionApi extends SessionStore {
     accountUuid: string
     loginMode?: string
   }) => Promise<void>
+  /** 停止游戏（Win 端「停止游戏」同款）：按会话 id 调 game.kill 结束进程树。 */
+  kill: () => Promise<void>
   clearLogs: () => void
   /** 关闭启动失败覆盖层（不清日志）。 */
   dismissLaunchError: () => void
@@ -47,6 +49,9 @@ export function useGameSession(): GameSessionApi {
   })
   const [selectedVersion, setVersion] = useState<string | undefined>()
   const startedRef = useRef(false)
+  // kill/launch 等动作要读最新会话 id：state 在闭包里是旧的，用 ref 镜像一份
+  const storeRef = useRef(store)
+  storeRef.current = store
 
   useEffect(() => {
     if (startedRef.current) return
@@ -76,6 +81,25 @@ export function useGameSession(): GameSessionApi {
     clearLogs: () => setStore((s) => ({ ...s, logs: [] })),
     dismissLaunchError: () =>
       setStore((s) => ({ ...s, launchFailed: false, status: '', stage: undefined, progress: undefined })),
+    kill: async () => {
+      const sessionId = storeRef.current.sessionId
+      if (sessionId === undefined) return
+      setStore((s) => ({ ...s, status: '正在停止游戏…' }))
+      try {
+        // 桥接 game.kill：按会话 id 结束整棵进程树（Win Runtime.Kill(pid) 同语义）
+        await request('game.kill', { sessionId })
+      } catch {
+        // 杀进程失败（已退出等）不阻塞本地收尾：会话已无效，照常复位状态
+      }
+      setStore((s) => ({
+        ...s,
+        pid: undefined,
+        sessionId: undefined,
+        launching: false,
+        exitCode: undefined,
+        status: '游戏已停止'
+      }))
+    },
     launch: async ({ versionId, playerName, accountUuid, loginMode }) => {
       if (startedRef.current === false) return
       const step = (stage: string, progress: number): void =>
@@ -92,7 +116,6 @@ export function useGameSession(): GameSessionApi {
         progress: 8,
         loginMode: loginMode ?? ''
       }))
-      const { request } = await import('../bridge')
       try {
         step('准备游戏文件…', 35)
         const session = await request<{ sessionId: number; pid: number; logFile?: string }>('launch.start', {

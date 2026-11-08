@@ -8,6 +8,13 @@ import type { NovaConfig, NovaPlanItem } from './bridge'
 import { useToasts } from './ui'
 import { IconSparkle } from './icons'
 
+/**
+ * Nova 五态状态机（Win 09#17：NovaRuntime 五态 Offline/Idle/Thinking/HasPlan/Observing）。
+ * Linux 前端骨架：由面板内 busy/plan/登录态推导；Observing（录屏观察循环）暂无对应物，
+ * 仅保留枚举与着色——桥接 nova.state 事件将来到来时由 App 层订阅覆盖。
+ */
+export type NovaRuntimeState = 'offline' | 'idle' | 'thinking' | 'hasPlan' | 'observing'
+
 /** 最近一条带 plan 的消息 id（只有它能执行/放弃）。 */
 interface PlanState {
   planId: string
@@ -29,6 +36,8 @@ export default function NovaChatPanel(props: {
   seed?: string
   /** 面板标头齿轮：先关面板再去 Nova 页（许可层 / 模型设置）。 */
   onGoSettings?: () => void
+  /** 五态变化回调：把本地推导的运行态提升给 App 层（顶栏 Orb 着色用，Win 09#17）。 */
+  onStateChange?: (state: NovaRuntimeState) => void
 }): JSX.Element {
   const { push, host } = useToasts()
   const [config, setConfig] = useState<NovaConfig>({ baseUrl: '', apiKey: '', model: '' })
@@ -62,6 +71,23 @@ export default function NovaChatPanel(props: {
   const signedIn = session?.loggedIn === true
   const configured =
     (config.baseUrl.length > 0 && config.model.length > 0) || (signedIn && useCloud)
+
+  // 五态推导（Win 09#17 ComputeState 的前端骨架）：进行中的对话优先（thinking > hasPlan > offline > idle），
+  // 提案执行中（planBusy）与流式回复同属一轮忙态。session 为 null = 登录态未知（未取到），先按待命处理，
+  // 防止每次开面板 Orb 闪「离线」。观察态仅由桥接 nova.state 事件给出。
+  const signedOut = session !== null && session.loggedIn !== true
+  const novaState: NovaRuntimeState = busy || planBusy
+    ? 'thinking'
+    : plan !== null
+      ? 'hasPlan'
+      : signedOut
+        ? 'offline'
+        : 'idle'
+
+  // 态变化上报（App 层供 Orb 着色；回调引用不稳定也安全：同值重复上报会被 React 合并）
+  useEffect(() => {
+    props.onStateChange?.(novaState)
+  }, [novaState, props.onStateChange])
 
   // 流式事件（nova.chat 只回 accepted，正文走事件）
   useEffect(() => {
@@ -145,12 +171,14 @@ export default function NovaChatPanel(props: {
     }
   }
 
-  // 标头副标题：当前走的通道（Win 端这一行是云端额度，桥接暂未下发，先显示通道状态）
-  const subtitle = !configured
+  // 标头副行（Win 09#2 布局：通道行 + 云端额度行，两行 11px 单行截断）。
+  // 桥接暂无 nova.quota，额度行先占位；仅「云端通道已登录」时显示（Win 同款条件）。
+  const channelLine = !configured
     ? '未配置模型'
     : signedIn && useCloud
       ? `云端模型 · ${session?.displayName ?? 'Starcloud ID'}`
       : `自接模型 · ${config.model}`
+  const quotaLine = signedIn && useCloud ? '额度信息将在连接后显示' : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -173,7 +201,9 @@ export default function NovaChatPanel(props: {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="t-strong">Nova</div>
-          <div className="t-meta truncate">{subtitle}</div>
+          {/* Win 09#2 副行结构：第一行通道状态，第二行云端额度（暂为占位文案） */}
+          <div className="t-meta truncate">{channelLine}</div>
+          {quotaLine !== null && <div className="t-meta truncate">{quotaLine}</div>}
         </div>
         <button
           className="btn btn-sm"
@@ -200,12 +230,27 @@ export default function NovaChatPanel(props: {
           padding: '2px 2px'
         }}
       >
-        {messages.length === 0 && (
-          <div className="t-cap" style={{ padding: '12px 0' }}>
-            {configured
-              ? '问点什么吧：查版本、算配置、写指令都可以。'
-              : '先在「模型设置」里填好 Base URL 与模型名，或登录 Starcloud ID 使用云端模型。'}
+        {messages.length === 0 && signedOut ? (
+          /* Win 09#23 未登录引导卡：文案照抄规格，按钮先关面板（宿主自行处理）再跳登录 */
+          <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="t-strong">Nova 尚未登录</div>
+            <div className="t-cap">
+              登录 Starcloud ID 后可使用云端模型，以及邀请、时刻等在线能力；凭据只保存在本机。
+            </div>
+            <div>
+              <button className="btn btn-primary btn-sm" onClick={() => props.onGoSettings?.()}>
+                去 Nova 页登录
+              </button>
+            </div>
           </div>
+        ) : (
+          messages.length === 0 && (
+            <div className="t-cap" style={{ padding: '12px 0' }}>
+              {configured
+                ? '问点什么吧：查版本、算配置、写指令都可以。'
+                : '先在「模型设置」里填好 Base URL 与模型名，或登录 Starcloud ID 使用云端模型。'}
+            </div>
+          )
         )}
         {messages.map((m) => (
           <div

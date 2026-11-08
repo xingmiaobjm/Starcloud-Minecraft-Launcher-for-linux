@@ -259,4 +259,161 @@ export function ColorTextTool(): JSX.Element {
   )
 }
 
+// ── 世吞生成器（Win LabPage「本地离线生成：TNT 爆破阵列」，spec 04 §3.4 / 差异 #30#31） ──
+//
+// TODO(接线)：本组件已完成参数面板 + TNT 估算 + 生成调用，等 Lab.tsx 在投影工坊
+// 分区挂载 <WorldEaterTool /> 即可替换原先固定参数的「生成世吞模板」按钮。
+
+interface WorldEaterParams {
+  length: number
+  width: number
+  layers: number
+  spacing: number
+  layerGap: number
+  offset: number
+}
+
+/** 6 参数面板定义（Win 04 §3.4 表格：名称 / 范围 / 默认值照抄）。 */
+const WORLD_EATER_PARAMS: Array<{
+  key: keyof WorldEaterParams
+  label: string
+  min: number
+  max: number
+  def: number
+}> = [
+  { key: 'length', label: '长度（X）', min: 1, max: 512, def: 64 },
+  { key: 'width', label: '宽度（Z）', min: 1, max: 512, def: 16 },
+  { key: 'layers', label: '层数', min: 1, max: 32, def: 3 },
+  { key: 'spacing', label: '同层间隔', min: 1, max: 16, def: 2 },
+  { key: 'layerGap', label: '层间空层', min: 0, max: 16, def: 1 },
+  { key: 'offset', label: '逐层错位（Z）', min: -64, max: 64, def: 2 }
+]
+
+/** 参数体检（后端 WorldEater.Validate 的报错文案照抄，估算行 / 提交前共用）。 */
+function worldEaterValidate(p: WorldEaterParams): string | null {
+  if (p.length < 1 || p.length > 512) return '长度需在 1~512 之间'
+  if (p.width < 1 || p.width > 512) return '宽度需在 1~512 之间'
+  if (p.layers < 1 || p.layers > 32) return '层数需在 1~32 之间'
+  if (p.spacing < 1 || p.spacing > 16) return '间隔需在 1~16 之间'
+  if (p.layerGap < 0 || p.layerGap > 16) return '层间距需在 0~16 之间'
+  if (Math.abs(p.offset) > 512) return '错位量过大'
+  return null
+}
+
+/** TNT 估算（WorldEater.EstimateTntCount 同公式：每层 ceil(尺寸/间隔) 网格 × 层数）。 */
+function worldEaterEstimate(p: WorldEaterParams): number {
+  const perLayerX = Math.ceil(p.length / p.spacing)
+  const perLayerZ = Math.ceil(p.width / p.spacing)
+  return perLayerX * perLayerZ * p.layers
+}
+
+export function WorldEaterTool(): JSX.Element {
+  const { push, host } = useToasts()
+  // 默认值与 Win 端 NumberBox 一致（64/16/3/2/1/2）
+  const [params, setParams] = useState<WorldEaterParams>({
+    length: 64,
+    width: 16,
+    layers: 3,
+    spacing: 2,
+    layerGap: 1,
+    offset: 2
+  })
+  const [generating, setGenerating] = useState(false)
+
+  // 任一参数变更即刷新估算（Win UpdateEaterEstimate：出错显示「参数有误：{0}」）
+  const validateError = worldEaterValidate(params)
+  const estimate = validateError === null ? worldEaterEstimate(params) : 0
+  // 体积同 Win 口径：X=长，Y=层数+层间空层×(层数-1)，Z=宽+|逐层错位×(层数-1)|
+  const sizeY = params.layers + params.layerGap * (params.layers - 1)
+  const sizeZ = params.width + Math.abs(params.offset * (params.layers - 1))
+
+  function setParam(key: keyof WorldEaterParams, raw: string): void {
+    const n = Math.round(Number(raw))
+    setParams((prev) => ({ ...prev, [key]: Number.isFinite(n) ? n : prev[key] }))
+  }
+
+  async function generate(): Promise<void> {
+    const err = worldEaterValidate(params)
+    if (err !== null) {
+      push('error', err) // Win：校验失败 → ErrorBar 原文，不发起生成
+      return
+    }
+    setGenerating(true)
+    try {
+      // TODO(Win 04 §3.4 #10)：Win 生成到投影目录并按
+      // 「世吞阵列-{长}x{宽}x{层}层-{yyyyMMdd-HHmmss}.litematic」命名；
+      // 桥接 lab.worldEater 目前只收这 6 个参数，文件名与落盘目录由后端决定
+      // （world-eater-<时间戳>.litematic → 启动器数据目录），待桥接补 dest 参数后对齐。
+      const r = await request<{ ok: boolean; path: string }>('lab.worldEater', { ...params })
+      const fileName = r.path.split(/[\\/]/).pop() ?? r.path
+      push('success', `已生成 ${fileName}（${estimate.toLocaleString()} 个 TNT）`)
+    } catch (e) {
+      push('error', `生成失败：${String(e)}`)
+    }
+    setGenerating(false)
+  }
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        <span style={{ width: 4, height: 16, borderRadius: 2, background: 'var(--accent)' }} />
+        <span className="t-strong" style={{ fontSize: 15 }}>本地离线生成：TNT 爆破阵列</span>
+      </div>
+      <div className="t-cap" style={{ marginBottom: 12 }}>
+        离线可用的简易工具：按参数铺分层 TNT 阵列，用于地形清理或作为自建机器的药室参照。
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+          gap: 10
+        }}
+      >
+        {WORLD_EATER_PARAMS.map((p) => (
+          <label
+            key={p.key}
+            style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}
+          >
+            <span className="t-cap">{p.label}</span>
+            <input
+              className="input"
+              type="number"
+              min={p.min}
+              max={p.max}
+              step={1}
+              value={params[p.key]}
+              onChange={(e) => setParam(p.key, e.target.value)}
+            />
+          </label>
+        ))}
+      </div>
+      <div
+        className="t-body"
+        style={{
+          marginTop: 12,
+          padding: '6px 10px',
+          borderRadius: 8,
+          background: 'var(--surface-subtle)',
+          color: validateError === null ? 'var(--text-primary)' : 'var(--danger)'
+        }}
+      >
+        {validateError !== null
+          ? `参数有误：${validateError}`
+          : `预计 TNT ${estimate.toLocaleString()} 个（体积 ${params.length}×${sizeY}×${sizeZ}）`}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+        <button
+          className="btn btn-primary"
+          style={{ fontWeight: 600 }}
+          disabled={generating || validateError !== null}
+          onClick={() => void generate()}
+        >
+          {generating ? '生成中…' : '生成 .litematic…'}
+        </button>
+      </div>
+      {host}
+    </div>
+  )
+}
+
 // ── 指令助手 ────────────────────────────────────────────────────────────────

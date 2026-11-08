@@ -261,9 +261,16 @@ export default function NovaPage(props: { seed?: string; onGoLogin?: () => void 
         </SectionCard>
       </div>
 
-      {/* Nova 对话浮层（内容与标题栏 Orb 弹层共用同一面板） */}
+      {/* Nova 对话浮层（内容与标题栏 Orb 弹层共用同一面板）。
+          未登录引导卡的按钮：先收浮层再跳账户页登录（弹层内不堆登录 UI） */}
       <Modal open={chatOpen} title="Nova" onClose={() => setChatOpen(false)} width={560}>
-        <NovaChatPanel seed={props.seed} />
+        <NovaChatPanel
+          seed={props.seed}
+          onGoSettings={() => {
+            setChatOpen(false)
+            props.onGoLogin?.()
+          }}
+        />
       </Modal>
 
       {host}

@@ -4,6 +4,7 @@
 /// 联机板块整页嵌在第二个标签（Win 端把 MultiplayerPage 塞进 SelectorBar 第二项）。
 /// 与 Win 的差异：消息实时推送（SSE）这里先用 20s 轮询替代，行为等价、延迟稍高。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 
 import { nativeApi, onBridgeEvent, request } from '../bridge'
@@ -21,7 +22,7 @@ import type {
   ScGroupSummary,
   ScSession
 } from '../bridge-friends'
-import { parseFileAttachment, parseRoomInvite } from '../bridge-friends'
+import { parseFileAttachment, parseRoomInvite, ROOM_INVITE_PREFIX } from '../bridge-friends'
 import MultiplayerPage from './Multiplayer'
 import { EmptyState, InfoBar, Modal, Segmented, Select, useToasts, type ToastKind } from '../ui'
 import { IconMore, IconPlus, IconSearch } from '../icons'
@@ -72,6 +73,27 @@ function initialOf(displayName: string, id: string): string {
   return name.trim() === '' ? '?' : name.trim()[0].toUpperCase()
 }
 
+/**
+ * 真实头像（B16）：avatar_url 直连 <img>，加载失败 onError 回落首字母色块
+ * （Win RemoteIconHelper 的「失败兜底首字母」口径；磁盘缓存不做，直接 src）。
+ */
+function AvatarImg(props: { url: string; initial: string }): JSX.Element {
+  const [failed, setFailed] = useState(false)
+  // 换会话 / 换 URL 时重置失败态，否则上一次的失败会污染新头像
+  useEffect(() => {
+    setFailed(false)
+  }, [props.url])
+  if (failed || props.url === '') return <>{props.initial}</>
+  return (
+    <img
+      src={props.url}
+      alt=""
+      onError={() => setFailed(true)}
+      style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+    />
+  )
+}
+
 const previewOf = (last: ScFriendMessage | null | undefined): string =>
   last === null || last === undefined
     ? '还没有消息'
@@ -90,6 +112,13 @@ const ATTACH_KIND_LABEL: Record<string, string> = {
   file: '文件',
   world: '存档'
 }
+
+/** 上传大小限制（Win 05：图片 ≤30MB / 文件·视频 ≤200MB，超限前端拦截）。 */
+const MAX_IMAGE_BYTES = 30 * 1024 * 1024
+const MAX_FILE_BYTES = 200 * 1024 * 1024
+
+/** 图片选择过滤器（Win FileOpenPicker 的 .png/.jpg/.jpeg/.gif/.webp/.bmp 同口径）。 */
+const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.bmp'
 
 /** 任意消息的会话预览文案（好友 / 群通用；附件消息显示类型 + 文件名）。 */
 function previewTextOf(content: string): string {
@@ -218,6 +247,26 @@ function InviteGlyph(): JSX.Element {
   )
 }
 
+/** 输入区工具图标（Win 05 §1.2 工具栏 EB9F / E8E5 的等价自绘）。 */
+function ImageGlyph(): JSX.Element {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="M5 17.5l4.2-4.2a1.4 1.4 0 0 1 2 0l5.6 5.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function FileGlyph(): JSX.Element {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M6 3.5h8l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 20V5A1.5 1.5 0 0 1 6 3.5z" />
+      <path d="M14 3.5V8h4.5" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 /** 空会话水印（Win 端 chat-empty.svg：两块对话气泡，铺得很淡）。 */
 function ChatWatermark(): JSX.Element {
   return (
@@ -238,6 +287,8 @@ interface Row {
   userId: string
   name: string
   initial: string
+  /** 真实头像 URL（B16：好友行走 avatar_url，失败回落首字母；群/系统行保持首字母）。 */
+  avatar?: string
   preview: string
   timeText: string
   unread: number
@@ -274,7 +325,12 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
   const [addOpen, setAddOpen] = useState(false)
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [invitesOpen, setInvitesOpen] = useState(false)
-  const [inviteOpen, setInviteOpen] = useState(false)
+  // 世界包三按钮弹窗（Win 05 §3.7「好友分享的世界」）
+  const [worldTarget, setWorldTarget] = useState<ScFileAttachment | null>(null)
+  // 房卡直发弹窗（Win 05#4 邀请联机 = 房卡直发；Linux 简化成输入框预填最近房间码）
+  const [roomInviteOpen, setRoomInviteOpen] = useState(false)
+  const [roomCodeDraft, setRoomCodeDraft] = useState('')
+  const [roomInviteBusy, setRoomInviteBusy] = useState(false)
 
   // 群聊（Win 0.4.0 同口径）
   const [groups, setGroups] = useState<ScGroupSummary[]>([])
@@ -291,6 +347,9 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
   const [attachBusy, setAttachBusy] = useState(false)
 
   const msgsRef = useRef<HTMLDivElement | null>(null)
+  /** 隐藏的附件选择 input（B15：图片 / 文件两个入口，accept 过滤器区分）。 */
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   /** 下一次消息渲染的滚动意图：end = 滚到底，keep = 保持阅读位置（加载更早时）。 */
   const scrollIntent = useRef<'end' | 'keep'>('end')
 
@@ -558,45 +617,90 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
     }
   }, [draft, selectedKind, selectedUserId, showBanner])
 
-  /** 发送附件：选文件 → 上传 → 以编码消息发出（好友或群通用）。 */
-  const sendFile = useCallback(async (): Promise<void> => {
-    const nat = nativeApi()
-    if (nat === null || selectedUserId === null || attachBusy) return
-    const path = await nat.pickFile('选择要发送的文件')
-    if (path === null) return
-    setAttachBusy(true)
-    try {
-      const up = await request<{
-        id: string
-        size: number
-        kind: string
-        content: string
-      }>('friends.uploadFile', { path })
-      if (selectedKind === 'group') {
-        const data = await request<{ message: ScGroupMessage }>('friends.groupSend', {
-          groupId: selectedUserId,
-          content: up.content
+  /** 输入框按键（B15）：Enter 发送；Ctrl+Enter 在光标处插换行（Win AcceptsReturn=False 同款）；
+   *  Shift+Enter 维持 textarea 默认换行。 */
+  const onComposerKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+      if (e.key !== 'Enter') return
+      if (e.ctrlKey) {
+        e.preventDefault()
+        const el = e.currentTarget
+        const start = el.selectionStart ?? draft.length
+        const end = el.selectionEnd ?? start
+        setDraft(draft.slice(0, start) + '\n' + draft.slice(end))
+        // 等 React 写回 value 后把光标挪到插入点之后
+        requestAnimationFrame(() => {
+          el.selectionStart = start + 1
+          el.selectionEnd = start + 1
         })
-        scrollIntent.current = 'end'
-        setGroupMessages((prev) => [...prev, data.message])
-        setGroupLast((prev) => ({ ...prev, [selectedUserId]: data.message }))
-      } else {
-        const data = await request<{ message: ScFriendMessage }>('friends.send', {
-          userId: selectedUserId,
-          content: up.content
-        })
-        scrollIntent.current = 'end'
-        setMessages((prev) => [...prev, data.message])
-        setLastMessages((prev) => ({ ...prev, [selectedUserId]: data.message }))
+        return
       }
-    } catch (e) {
-      showBanner('error', `发送文件失败：${String(e)}`)
-    } finally {
-      setAttachBusy(false)
-    }
-  }, [attachBusy, selectedKind, selectedUserId, showBanner])
+      if (!e.shiftKey) {
+        e.preventDefault()
+        void sendMessage()
+      }
+    },
+    [draft, sendMessage]
+  )
 
-  /** 下载附件气泡里的文件（用户选保存位置）。 */
+  /**
+   * 发送附件（B15）：「发送图片」「发送文件」两个入口各自持一个隐藏 input，
+   * 用 File.size 做 Win 同款发送前校验（30MB / 200MB），再经 getPathForFile
+   * 换成本地路径走 friends.uploadFile（桥接按扩展名判 kind，与 Win 同口径）。
+   */
+  const onPickFile = useCallback(
+    async (entry: 'image' | 'file', files: FileList | null): Promise<void> => {
+      const file = files?.item(0) ?? null
+      if (file === null) return // 用户取消（没选文件）
+      // Win 05：发送前大小校验，超限直接提示、不上传
+      if (entry === 'image' && file.size > MAX_IMAGE_BYTES) {
+        push('error', '文件超过大小限制（30 MB）。')
+        return
+      }
+      if (entry === 'file' && file.size > MAX_FILE_BYTES) {
+        push('error', '文件超过大小限制（200 MB）。')
+        return
+      }
+      const nat = nativeApi()
+      if (nat === null || selectedUserId === null || attachBusy) {
+        if (nat === null) showBanner('info', '发送文件需要桌面端')
+        return
+      }
+      setAttachBusy(true)
+      try {
+        const up = await request<{
+          id: string
+          size: number
+          kind: string
+          content: string
+        }>('friends.uploadFile', { path: nat.getPathForFile(file) })
+        if (selectedKind === 'group') {
+          const data = await request<{ message: ScGroupMessage }>('friends.groupSend', {
+            groupId: selectedUserId,
+            content: up.content
+          })
+          scrollIntent.current = 'end'
+          setGroupMessages((prev) => [...prev, data.message])
+          setGroupLast((prev) => ({ ...prev, [selectedUserId]: data.message }))
+        } else {
+          const data = await request<{ message: ScFriendMessage }>('friends.send', {
+            userId: selectedUserId,
+            content: up.content
+          })
+          scrollIntent.current = 'end'
+          setMessages((prev) => [...prev, data.message])
+          setLastMessages((prev) => ({ ...prev, [selectedUserId]: data.message }))
+        }
+      } catch (e) {
+        showBanner('error', `发送文件失败：${String(e)}`)
+      } finally {
+        setAttachBusy(false)
+      }
+    },
+    [attachBusy, push, selectedKind, selectedUserId, showBanner]
+  )
+
+  /** 下载附件气泡里的文件（用户选保存位置，「另存为…」的通用流程）。 */
   const downloadAttachment = useCallback(
     async (a: ScFileAttachment): Promise<void> => {
       const nat = nativeApi()
@@ -615,6 +719,83 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
     },
     [push, showBanner]
   )
+
+  /** 附件「点保存」的总入口（A29/A30）：世界包弹三按钮，其余走系统保存对话框。 */
+  const activateAttachment = useCallback(
+    async (a: ScFileAttachment): Promise<void> => {
+      // kind=world 或 .zip 世界包特征 → Win 05#3「好友分享的世界」三按钮弹窗
+      if (a.kind === 'world' || a.name.toLowerCase().endsWith('.zip')) {
+        setWorldTarget(a)
+        return
+      }
+      await downloadAttachment(a)
+    },
+    [downloadAttachment]
+  )
+
+  /** 导入到存档库：下载到数据目录的临时文件 → 既有 saves.importShare 流（level.dat
+   *  校验 + 重名自动改名由桥接做）。渲染层没有删除文件的能力，临时文件用固定名
+   *  覆盖写，不会越积越多（Win 的「临时文件用完即删」的等价简化）。 */
+  const importWorldToSaves = useCallback(
+    async (a: ScFileAttachment): Promise<void> => {
+      try {
+        const paths = await request<{ dataDir: string }>('app.paths')
+        const destPath = `${paths.dataDir}/friend-world-share.zip`
+        push('info', `正在下载 ${a.name}…`)
+        await request('friends.downloadFile', { fileId: a.id, destPath })
+        push('info', '正在导入到存档库…')
+        const r = await request<{ folderName: string }>('saves.importShare', { zipPath: destPath })
+        push('success', `已导入世界「${r.folderName}」到共享存档，可到「存档」页查看。`)
+      } catch (e) {
+        // 桥接的 level.dat 校验失败会带原文「这不是有效的世界分享包（zip 根目录缺少 level.dat）」
+        push('error', `导入失败：${String(e)}`)
+      }
+    },
+    [push]
+  )
+
+  /** 打开房卡直发弹窗（Win 05#4：有房间直接编码房卡发出；Linux 简化成输入框预填最近房间码）。 */
+  const openRoomInvite = useCallback(async (): Promise<void> => {
+    let room = ''
+    try {
+      const snap = await request<MultiplayerSnapshot>('multiplayer.state')
+      room = snap.state.room ?? ''
+    } catch {
+      room = ''
+    }
+    setRoomCodeDraft(room)
+    setRoomInviteOpen(true)
+  }, [])
+
+  /** 发送房卡消息：[联机邀请] 前缀 + JSON（code/name/mc/loader/owner），与
+   *  bridge-friends.parseRoomInvite 对应；留空 = 取消，不发并提示（Win 无房间文案）。 */
+  const sendRoomCard = useCallback(async (): Promise<void> => {
+    if (roomInviteBusy || selectedKind !== 'friend' || selectedUserId === null) return
+    const code = roomCodeDraft.trim()
+    if (code === '') {
+      setRoomInviteOpen(false)
+      showBanner('info', '先开一个联机房间，才能在聊天里发邀请。')
+      return
+    }
+    setRoomInviteBusy(true)
+    try {
+      const payload: Record<string, string> = { code }
+      if (session?.userId) payload.owner = session.userId
+      const data = await request<{ message: ScFriendMessage }>('friends.send', {
+        userId: selectedUserId,
+        content: ROOM_INVITE_PREFIX + JSON.stringify(payload)
+      })
+      setRoomInviteOpen(false)
+      scrollIntent.current = 'end'
+      setMessages((prev) => [...prev, data.message])
+      setLastMessages((prev) => ({ ...prev, [selectedUserId]: data.message }))
+      showBanner('success', '已发出联机邀请卡片。')
+    } catch (e) {
+      showBanner('error', `发送失败：${String(e)}`)
+    } finally {
+      setRoomInviteBusy(false)
+    }
+  }, [roomCodeDraft, roomInviteBusy, selectedKind, selectedUserId, session, showBanner])
 
   /** 加载更早的群消息。 */
   const loadOlderGroup = useCallback(async (): Promise<void> => {
@@ -705,6 +886,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
         userId: f.user_id,
         name: f.display_name,
         initial: initialOf(f.display_name, f.id),
+        avatar: f.avatar_url,
         preview: previewOf(last),
         timeText: formatStamp(last?.created_at),
         unread: Math.max(f.unread, 0),
@@ -885,11 +1067,13 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                     else void openConversation(r.userId)
                   }}
                 >
-                  <span className="fr-avatar">
+                  <span className="fr-avatar" style={r.avatar !== undefined ? { overflow: 'hidden' } : undefined}>
                     {r.system === 'requests' ? (
                       <RequestGlyph />
                     ) : r.system === 'invites' ? (
                       <InviteGlyph />
+                    ) : r.avatar !== undefined && r.avatar !== '' ? (
+                      <AvatarImg url={r.avatar} initial={r.initial} />
                     ) : (
                       r.initial
                     )}
@@ -969,7 +1153,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                       createdAt: m.created_at
                     }))}
                     meId={session?.userId ?? ''}
-                    onDownload={(a) => void downloadAttachment(a)}
+                    onDownload={(a) => void activateAttachment(a)}
                   />
                 </div>
 
@@ -977,24 +1161,28 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                   <button
                     className="btn"
                     style={{ height: 36, padding: '0 12px' }}
-                    title="发送文件"
+                    title="发送图片（≤30MB）"
                     disabled={attachBusy}
-                    onClick={() => void sendFile()}
+                    onClick={() => imageInputRef.current?.click()}
                   >
-                    <IconPlus size={15} />
+                    <ImageGlyph />
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ height: 36, padding: '0 12px' }}
+                    title="发送文件 / 视频（≤200MB）"
+                    disabled={attachBusy}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <FileGlyph />
                   </button>
                   <textarea
                     className="input"
                     style={{ minHeight: 36, maxHeight: 110, height: 36, resize: 'none', paddingTop: 7.5, flex: 1 }}
-                    placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                    placeholder="输入消息，Enter 发送，Ctrl+Enter 换行"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        void sendMessage()
-                      }
-                    }}
+                    onKeyDown={(e) => onComposerKeyDown(e)}
                   />
                   <button
                     className="btn btn-primary"
@@ -1009,7 +1197,19 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
             ) : selectedFriend !== null ? (
               <>
                 <div className="fr-chat-head">
-                  <span className="fr-avatar">{initialOf(selectedFriend.display_name, selectedFriend.id)}</span>
+                  <span
+                    className="fr-avatar"
+                    style={selectedFriend.avatar_url !== undefined ? { overflow: 'hidden' } : undefined}
+                  >
+                    {selectedFriend.avatar_url !== undefined && selectedFriend.avatar_url !== '' ? (
+                      <AvatarImg
+                        url={selectedFriend.avatar_url}
+                        initial={initialOf(selectedFriend.display_name, selectedFriend.id)}
+                      />
+                    ) : (
+                      initialOf(selectedFriend.display_name, selectedFriend.id)
+                    )}
+                  </span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="t-strong truncate">{selectedFriend.display_name}</div>
                     <div className="t-cap truncate">{selectedFriend.id}</div>
@@ -1018,7 +1218,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                     title="更多操作"
                     items={[
                       { label: '加载更早的消息', onSelect: () => void loadOlder(), disabled: !hasMore },
-                      { label: '邀请联机', onSelect: () => setInviteOpen(true) },
+                      { label: '邀请联机', onSelect: () => void openRoomInvite() },
                       {
                         label: '删除好友',
                         danger: true,
@@ -1040,6 +1240,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                     meId={session?.userId ?? ''}
                     myInitial={initialOf(session?.displayName ?? '', session?.userId ?? '')}
                     peerAvatar={selectedFriend.avatar_url ?? null}
+                    onActivateAttachment={(a) => void activateAttachment(a)}
                     onJoinRoom={(code) => {
                       void request('multiplayer.join', { room: code })
                         .then(() => {
@@ -1055,24 +1256,28 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
                   <button
                     className="btn"
                     style={{ height: 36, padding: '0 12px' }}
-                    title="发送文件"
+                    title="发送图片（≤30MB）"
                     disabled={attachBusy}
-                    onClick={() => void sendFile()}
+                    onClick={() => imageInputRef.current?.click()}
                   >
-                    <IconPlus size={15} />
+                    <ImageGlyph />
+                  </button>
+                  <button
+                    className="btn"
+                    style={{ height: 36, padding: '0 12px' }}
+                    title="发送文件 / 视频（≤200MB）"
+                    disabled={attachBusy}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <FileGlyph />
                   </button>
                   <textarea
                     className="input"
                     style={{ minHeight: 36, maxHeight: 110, height: 36, resize: 'none', paddingTop: 7.5, flex: 1 }}
-                    placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                    placeholder="输入消息，Enter 发送，Ctrl+Enter 换行"
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        void sendMessage()
-                      }
-                    }}
+                    onKeyDown={(e) => onComposerKeyDown(e)}
                   />
                   <button
                     className="btn btn-primary"
@@ -1113,14 +1318,105 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
         }}
         onChanged={() => void refreshCounts()}
       />
-      <InviteFriendDialog
-        open={inviteOpen}
-        friends={friends}
-        presetUserId={selectedUserId}
-        onClose={() => setInviteOpen(false)}
-        onSent={(msg) => {
-          showBanner('success', msg)
-          void refreshCounts()
+      {/* 世界包三按钮弹窗（Win 05 §3.7「好友分享的世界」原文文案） */}
+      <Modal
+        open={worldTarget !== null}
+        title="好友分享的世界"
+        onClose={() => setWorldTarget(null)}
+        width={440}
+        footer={
+          <>
+            <button className="btn" onClick={() => setWorldTarget(null)}>
+              取消
+            </button>
+            <button
+              className="btn"
+              disabled={worldTarget === null}
+              onClick={() => {
+                const a = worldTarget
+                setWorldTarget(null)
+                if (a !== null) void downloadAttachment(a)
+              }}
+            >
+              另存为…
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={worldTarget === null}
+              onClick={() => {
+                const a = worldTarget
+                setWorldTarget(null)
+                if (a !== null) void importWorldToSaves(a)
+              }}
+            >
+              导入到存档库
+            </button>
+          </>
+        }
+      >
+        {worldTarget !== null && (
+          <div style={{ whiteSpace: 'pre-wrap' }}>
+            {`${worldTarget.name}（${fmtBytes(worldTarget.size)}）。「导入到存档库」会把它放进共享存档，重名自动改名；也可以只另存为文件。`}
+          </div>
+        )}
+      </Modal>
+
+      {/* 房卡直发（Win 05#4：邀请联机 = 房卡直发；Linux 简化：输入框预填最近房间码，留空取消） */}
+      <Modal
+        open={roomInviteOpen}
+        title="邀请联机"
+        onClose={() => setRoomInviteOpen(false)}
+        width={420}
+        footer={
+          <>
+            <button className="btn" onClick={() => setRoomInviteOpen(false)}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              disabled={roomInviteBusy}
+              onClick={() => void sendRoomCard()}
+            >
+              发送
+            </button>
+          </>
+        }
+      >
+        <div className="t-cap" style={{ marginBottom: 8 }}>
+          把联机房间码以房卡消息发给对方，对方点「加入房间」即可进房；留空则取消发送。
+        </div>
+        <input
+          className="input"
+          autoFocus
+          placeholder="联机房间码"
+          value={roomCodeDraft}
+          onChange={(e) => setRoomCodeDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void sendRoomCard()
+          }}
+        />
+      </Modal>
+
+      {/* 隐藏的附件选择 input（B15：accept 过滤器区分图片 / 文件，File.size 做发送前校验） */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        hidden
+        accept={IMAGE_ACCEPT}
+        onChange={(e) => {
+          void onPickFile('image', e.target.files)
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        hidden
+        onChange={(e) => {
+          void onPickFile('file', e.target.files)
+          e.target.value = ''
         }}
       />
       <CreateGroupDialog
@@ -1177,10 +1473,12 @@ function ChatRows(props: {
   meId: string
   /** 好友聊天：自己的头像首字母（昵称优先，与原实现一致）。 */
   myInitial?: string
-  /** 好友聊天：对方的远程头像 URL（Win 0.4.0-beta.1 聊天头像）。 */
+  /** 好友聊天：对方的远程头像 URL（B16：真实头像，失败回落首字母；群聊保持首字母）。 */
   peerAvatar?: string | null
-  /** 群聊回调：下载附件。 */
+  /** 群聊回调：附件「下载」按钮（保留群聊按钮式交互）。 */
   onDownload?: (a: ScFileAttachment) => void
+  /** 好友聊天回调（A29）：附件气泡整块可点触发保存（世界包弹三按钮）。 */
+  onActivateAttachment?: (a: ScFileAttachment) => void
   /** 房卡消息一键进房（有此回调才把 [联机邀请] 渲染成卡片）。 */
   onJoinRoom?: (code: string) => void
 }): JSX.Element {
@@ -1198,22 +1496,19 @@ function ChatRows(props: {
     if (time !== null) previous = time
     const mine = line.mine
     const attachment = parseFileAttachment(line.content)
+    // 群聊走 onDownload（按钮式）；好友走 onActivateAttachment（整块气泡可点）
     const isGroup = props.onDownload !== undefined
+    const bubbleSave = props.onActivateAttachment !== undefined
     const initial =
       mine && !isGroup && props.myInitial !== undefined ? props.myInitial : initialOf(line.fromId, line.fromId)
+    // 对方气泡用真实头像（avatar_url 直连，onError 回落首字母）；群聊成员保持首字母
     const avatar = !mine && !isGroup && props.peerAvatar ? (
-      <img
-        src={props.peerAvatar}
-        alt=""
-        width={28}
-        height={28}
-        style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
-      />
+      <AvatarImg url={props.peerAvatar} initial={initial} />
     ) : null
     const roomInvite = parseRoomInvite(line.content)
     nodes.push(
       <div key={line.key} className={`fr-msg${mine ? ' fr-msg-mine' : ''}`}>
-        <span className="fr-avatar fr-avatar-sm" style={avatar ? { overflow: 'visible', background: 'none' } : undefined}>
+        <span className="fr-avatar fr-avatar-sm" style={avatar ? { overflow: 'hidden' } : undefined}>
           {avatar ?? initial}
         </span>
         {roomInvite !== null ? (
@@ -1239,7 +1534,12 @@ function ChatRows(props: {
             )}
           </span>
         ) : attachment !== null ? (
-          <span className={`fr-bubble fr-file-bubble${mine ? ' fr-bubble-mine' : ''}`}>
+          <span
+            className={`fr-bubble fr-file-bubble${mine ? ' fr-bubble-mine' : ''}`}
+            role={bubbleSave ? 'button' : undefined}
+            style={bubbleSave ? { cursor: 'pointer' } : undefined}
+            onClick={bubbleSave ? () => props.onActivateAttachment?.(attachment) : undefined}
+          >
             <span className="fr-file-info" style={{ minWidth: 0 }}>
               <span className="fr-file-name truncate" style={{ display: 'block' }}>
                 {attachment.name}
@@ -1247,8 +1547,9 @@ function ChatRows(props: {
               <span className="fr-file-meta">
                 {ATTACH_KIND_LABEL[attachment.kind] ?? '文件'} · {fmtBytes(attachment.size)}
               </span>
+              {bubbleSave && <span className="fr-file-meta">点击保存</span>}
             </span>
-            {props.onDownload !== undefined && (
+            {!bubbleSave && props.onDownload !== undefined && (
               <button
                 className="btn btn-sm"
                 style={{ flexShrink: 0 }}
@@ -1831,6 +2132,8 @@ function InvitesDialog(props: {
 }
 
 // ── 邀请好友联机（Win InviteFriendDialog：房间码 / 地址端口至少一项） ──────────
+// A31：旧邀请表单已不再挂载（「邀请联机」改为房卡直发，见 openRoomInvite /
+// sendRoomCard）。组件按规格要求保留在源文件里，不再接入任何菜单入口。
 
 function InviteFriendDialog(props: {
   open: boolean

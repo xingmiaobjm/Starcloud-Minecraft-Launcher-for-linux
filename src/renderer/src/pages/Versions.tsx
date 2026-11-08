@@ -153,6 +153,20 @@ const FORMAT_LABEL: Record<string, string> = {
   raw: '通用压缩包'
 }
 
+/** 每种导出格式的说明行（Win 03 §5.1，照抄）。 */
+const FORMAT_HINT: Record<string, string> = {
+  modrinth: '按 SHA1 反查 Modrinth 来源；反查不到的文件按下方策略处理。',
+  curseforge: '按文件指纹反查 CurseForge 来源；反查不到的文件按下方策略处理。',
+  multimc: '自包含实例包：全部内容原样打进 .minecraft/，不联网反查，导入端解压即用。'
+}
+
+/** 压缩级别（Win 03 §5.1 三档；桥接 versions.exportModpack 暂无压缩参数，见 doExport TODO）。 */
+const COMPRESSION_LABEL: Record<string, string> = {
+  optimal: '最优压缩（体积最小）',
+  fast: '快速压缩（速度优先）',
+  none: '不压缩（最快）'
+}
+
 /** 依赖键 → 展示名（导出时加载器类型固定，只展示）。 */
 const LOADER_DISPLAY: Record<string, string> = {
   'fabric-loader': 'Fabric',
@@ -176,6 +190,10 @@ export default function VersionsPage(props: {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<InstalledVersion | null>(null)
+  /** 运行中守卫弹窗（Win Delete_Click：运行中只弹提示，没有删除按钮） */
+  const [guard, setGuard] = useState<InstalledVersion | null>(null)
+  /** 正在运行的版本 id 集合（runtime.state 的 instances；删除守卫用） */
+  const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
   const [gameDir, setGameDir] = useState('')
   const [query, setQuery] = useState('')
   const [kindFilter, setKindFilter] = useState('全部')
@@ -205,7 +223,7 @@ export default function VersionsPage(props: {
     {
       label: '删除',
       danger: true,
-      onSelect: () => menuRef.current !== null && setConfirm(menuRef.current)
+      onSelect: () => void openDeleteConfirm(menuRef.current)
     }
   ])
 
@@ -227,6 +245,13 @@ export default function VersionsPage(props: {
   const [exportLoaderKey, setExportLoaderKey] = useState('none')
   const [exportLoaderVer, setExportLoaderVer] = useState('')
   const [exportDirs, setExportDirs] = useState<Set<string>>(new Set())
+  /** 自定义目录（Win 03 §5.1：输入目录名 + 添加，追加进勾选列表与 dirs 参数） */
+  const [exportCustomDirs, setExportCustomDirs] = useState<string[]>([])
+  const [exportNewDir, setExportNewDir] = useState('')
+  const [exportDirError, setExportDirError] = useState('')
+  /** 打包策略（Win 03 §5.1：包含实例设置默认勾选；压缩级别默认最优） */
+  const [exportIncludeSettings, setExportIncludeSettings] = useState(true)
+  const [exportCompression, setExportCompression] = useState<'optimal' | 'fast' | 'none'>('optimal')
   const [exportExclude, setExportExclude] = useState('')
   const [exportBusy, setExportBusy] = useState(false)
   const [progress, setProgress] = useState<{ stage: string; percent: number } | null>(null)
@@ -267,6 +292,19 @@ export default function VersionsPage(props: {
     }
   }, [])
 
+  /** 运行实例清单（Win `_s.Runtime.Instances` 同口径：删除守卫用它判断运行中）。 */
+  async function loadRuntime(): Promise<void> {
+    try {
+      const r = await request<{ instances?: Array<{ pid: number; versionId: string }> }>(
+        'runtime.state',
+        {}
+      )
+      setRunningIds(new Set((r.instances ?? []).map((i) => i.versionId)))
+    } catch {
+      setRunningIds(new Set())
+    }
+  }
+
   async function reload(): Promise<void> {
     setLoading(true)
     try {
@@ -283,6 +321,7 @@ export default function VersionsPage(props: {
     } catch {
       /* 目录读取失败不阻塞列表 */
     }
+    await loadRuntime()
   }
 
   useEffect(() => {
@@ -290,15 +329,48 @@ export default function VersionsPage(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const kinds = ['全部', '正式版', '快照版', 'NeoForge', 'Forge', 'Fabric', 'Quilt']
+  /**
+   * 用户自定义类别（Win 02 §3.2：实例档案 profile.Category，在版本详情页填写）。
+   * 桥接 catalog.installed 目前未返回 category 字段，返回后筛选与搜索自动生效；
+   * 这里按「可能出现的字段」读取，取不到按未分类处理。
+   */
+  function categoryOf(v: InstalledVersion): string {
+    const c = (v as { category?: unknown }).category
+    return typeof c === 'string' ? c.trim() : ''
+  }
+
+  // 类别筛选动态项（Win 02 §3.2：全部 / 未分类 / 动态类别去重排序）
+  const categories = useMemo(() => {
+    const set = new Set<string>()
+    for (const v of items) {
+      const c = categoryOf(v)
+      if (c !== '') set.add(c)
+    }
+    return ['全部', '未分类', ...[...set].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items])
+
+  // 列表重建后原筛选可能失效：失效则回「全部」（Win 02 §3.2 同口径）
+  useEffect(() => {
+    if (!categories.includes(kindFilter)) setKindFilter('全部')
+  }, [categories, kindFilter])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return items.filter((v) => {
-      if (q !== '' && !v.id.toLowerCase().includes(q)) return false
-      if (kindFilter !== '全部' && tagFor(v) !== kindFilter) return false
+      const cat = categoryOf(v)
+      // 搜索范围：id + 类别（Win 02 §3.2 SearchBox：id + category 小写包含）
+      if (q !== '' && !(v.id.toLowerCase().includes(q) || cat.toLowerCase().includes(q))) {
+        return false
+      }
+      if (kindFilter === '未分类') {
+        if (cat !== '') return false
+      } else if (kindFilter !== '全部' && cat !== kindFilter) {
+        return false
+      }
       return true
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, query, kindFilter])
 
   async function openFolder(): Promise<void> {
@@ -385,6 +457,11 @@ export default function VersionsPage(props: {
       setExportLoaderKey(loaderKey ?? 'none')
       setExportLoaderVer(loaderKey !== undefined ? (probe.dependencies[loaderKey] ?? '') : '')
       setExportDirs(new Set(probe.dirs.filter((d) => d.standard).map((d) => d.name)))
+      setExportCustomDirs([])
+      setExportNewDir('')
+      setExportDirError('')
+      setExportIncludeSettings(true)
+      setExportCompression('optimal')
       setExportExclude('')
     } catch (e) {
       push('error', String(e))
@@ -398,6 +475,29 @@ export default function VersionsPage(props: {
       setExportDirs(new Set(prev.dirs.filter((d) => want(d.name)).map((d) => d.name)))
       return prev
     })
+  }
+
+  /** 自定义目录添加（Win 03 §5.1：三条本地可校验文案；「目录不存在」校验缺桥接入口，见注释）。 */
+  function addExportCustomDir(): void {
+    const name = exportNewDir.trim()
+    if (name === '') {
+      setExportDirError('请输入目录名。')
+      return
+    }
+    if (/[<>:"/\\|?*]/.test(name)) {
+      setExportDirError('目录名不合法。')
+      return
+    }
+    if (exportCustomDirs.includes(name) || (exportProbe?.dirs ?? []).some((d) => d.name === name)) {
+      setExportDirError('该目录已在列表中。')
+      return
+    }
+    // TODO(Win 03 §5.1「目录不存在：{0}」)：渲染层无法探测磁盘目录、桥接也无 stat 入口，
+    // 暂不做存在性校验；不存在的目录导出时按 0 个文件处理，无副作用。
+    setExportCustomDirs((prev) => [...prev, name])
+    setExportDirs((prev) => new Set(prev).add(name))
+    setExportNewDir('')
+    setExportDirError('')
   }
 
   async function doExport(): Promise<void> {
@@ -444,7 +544,10 @@ export default function VersionsPage(props: {
           .split('\n')
           .map((s) => s.trim())
           .filter((s) => s !== ''),
-        includeGameSettings: false,
+        // TODO(Win 03 §5.1 压缩级别)：桥接 versions.exportModpack 尚无压缩参数（后端固定默认档），
+        // UI 先收集 exportCompression，桥接补参数后透传即可
+        compressionLevel: exportCompression,
+        includeGameSettings: exportIncludeSettings,
         unresolvedAsOverrides: true
       })
       let msg = `${kindLabel} · 可下载 ${r.downloadableFiles} 个 · 打包 ${r.overriddenFiles} 个 · 共 ${fmtSize(r.totalBytes)}`
@@ -649,6 +752,32 @@ export default function VersionsPage(props: {
     }
   }
 
+  /**
+   * 删除入口（菜单「删除」与行内删除快键共用，Win Delete_Click 同流程）：
+   * 先取一次最新运行实例 —— 运行中只弹「请先停止游戏再删除」守卫弹窗（没有删除按钮），
+   * 否则按隔离 / 共享两套文案弹确认（默认取消）。
+   */
+  async function openDeleteConfirm(v: InstalledVersion | null): Promise<void> {
+    if (v === null) return
+    // 点删除时取一次最新运行实例（runtime.state），别用加载页面时的旧快照
+    let running = false
+    try {
+      const r = await request<{ instances?: Array<{ versionId: string }> }>('runtime.state', {})
+      const ids = new Set((r.instances ?? []).map((i) => i.versionId))
+      setRunningIds(ids)
+      running = ids.has(v.id)
+    } catch {
+      running = runningIds.has(v.id)
+    }
+    if (running) {
+      setConfirm(null)
+      setGuard(v)
+      return
+    }
+    setGuard(null)
+    setConfirm(v)
+  }
+
   if (openId !== null) {
     return <VersionDetailPage versionId={openId} onBack={() => setOpenId(null)} />
   }
@@ -698,7 +827,7 @@ export default function VersionsPage(props: {
         <Select
           width={110}
           value={kindFilter}
-          options={kinds.map((k) => ({ value: k, label: k }))}
+          options={categories.map((k) => ({ value: k, label: k }))}
           onChange={setKindFilter}
         />
         <button className="btn" onClick={() => void reload()} disabled={loading}>
@@ -773,11 +902,11 @@ export default function VersionsPage(props: {
               </button>
               <button
                 className="btn btn-subtle btn-sm btn-danger"
-                title="删除"
+                title="删除该版本"
                 disabled={busy !== null}
                 onClick={(e) => {
                   e.stopPropagation()
-                  setConfirm(v)
+                  void openDeleteConfirm(v)
                 }}
               >
                 <IconTrash size={15} />
@@ -906,6 +1035,11 @@ export default function VersionsPage(props: {
               ]}
               onChange={setExportFormat}
             />
+            {FORMAT_HINT[exportFormat] !== undefined && (
+              <div className="t-cap" style={{ marginTop: -6 }}>
+                {FORMAT_HINT[exportFormat]}
+              </div>
+            )}
             <div className="t-strong" style={{ fontSize: 14 }}>包元数据</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', alignItems: 'center' }}>
               <label className="t-cap" style={{ fontSize: 12 }}>名称</label>
@@ -975,6 +1109,70 @@ export default function VersionsPage(props: {
                   </span>
                 </label>
               ))}
+              {/* 自定义目录（Win 03 §5.1：追加进列表，标「（自定义）」，勾选态随添加即选） */}
+              {exportCustomDirs
+                .filter((n) => !(exportProbe.dirs ?? []).some((d) => d.name === n))
+                .map((n) => (
+                  <label key={n} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={exportDirs.has(n)}
+                      onChange={(e) => {
+                        setExportDirs((prev) => {
+                          const next = new Set(prev)
+                          if (e.target.checked) next.add(n)
+                          else next.delete(n)
+                          return next
+                        })
+                      }}
+                    />
+                    {n}
+                    <span className="t-cap">（自定义）</span>
+                  </label>
+                ))}
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                placeholder="目录名，如 kubejs / schematics"
+                value={exportNewDir}
+                onChange={(e) => {
+                  setExportNewDir(e.target.value)
+                  setExportDirError('')
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') addExportCustomDir()
+                }}
+              />
+              <button className="btn" onClick={addExportCustomDir}>
+                添加
+              </button>
+            </div>
+            {exportDirError !== '' && (
+              <div className="t-cap" style={{ color: 'var(--danger)', marginTop: -6 }}>
+                {exportDirError}
+              </div>
+            )}
+            <div className="t-strong" style={{ fontSize: 14 }}>打包策略与排除规则</div>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={exportIncludeSettings}
+                onChange={(e) => setExportIncludeSettings(e.target.checked)}
+              />
+              包含实例设置（options.txt / servers.dat 等）
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', alignItems: 'center' }}>
+              <label className="t-cap" style={{ fontSize: 12 }}>压缩级别</label>
+              <Select
+                width={220}
+                value={exportCompression}
+                options={(Object.keys(COMPRESSION_LABEL) as Array<'optimal' | 'fast' | 'none'>).map(
+                  (k) => ({ value: k, label: COMPRESSION_LABEL[k] })
+                )}
+                onChange={setExportCompression}
+              />
             </div>
             <label className="t-cap" style={{ fontSize: 12 }}>
               排除规则（每行一条；含 / 匹配整条相对路径，否则匹配任意一层目录名，支持 * 与 ?）
@@ -1236,10 +1434,26 @@ export default function VersionsPage(props: {
         )}
       </Modal>
 
-      {/* 删除确认 */}
+      {/* 运行中删除守卫（Win Delete_Click：运行中只弹这句话，没有删除按钮） */}
+      <Modal
+        open={guard !== null}
+        title="删除版本"
+        onClose={() => setGuard(null)}
+        footer={
+          <button className="btn" onClick={() => setGuard(null)}>
+            关闭
+          </button>
+        }
+      >
+        <div className="dialog-body">
+          版本 <b>{guard?.id}</b> 正在运行，请先停止游戏再删除。
+        </div>
+      </Modal>
+
+      {/* 删除确认（文案照抄 Win：隔离 / 共享两套；按钮 删除/取消，默认取消） */}
       <Modal
         open={confirm !== null}
-        title="删除版本？"
+        title="删除版本"
         onClose={() => setConfirm(null)}
         footer={
           <>
@@ -1261,7 +1475,18 @@ export default function VersionsPage(props: {
         }
       >
         <div className="dialog-body">
-          将删除版本 <b>{confirm?.id}</b> 的整个目录（含模组与配置），不可恢复。
+          确定要删除版本 <b>{confirm?.id}</b> 吗？
+          <br />
+          {confirm?.isolated === true
+            ? '将删除其版本文件夹（含 mods / 存档 / 配置），此操作不可恢复。'
+            : '将删除其版本文件夹，此操作不可恢复。'}
+          {confirm?.isolated === true ? null : (
+            <>
+              <br />
+              <br />
+              注意：这是共享实例，mods / 配置 / 存档等文件位于 .minecraft 根目录，不会被一并删除。
+            </>
+          )}
         </div>
       </Modal>
 
