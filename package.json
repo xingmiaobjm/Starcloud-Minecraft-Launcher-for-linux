@@ -34,9 +34,9 @@
     "name": "Starcloud",
     "email": "dev@starcloud.local"
   },
-  "homepage": "https://github.com/starcloud/launcher",
+  "homepage": "https://github.com/xingmiaobjm/Starcloud-Minecraft-Launcher-for-linux",
   "repository": {
     "type": "git",
-    "url": "https://github.com/starcloud/launcher.git"
+    "url": "https://github.com/xingmiaobjm/Starcloud-Minecraft-Launcher-for-linux.git"
   }
 }
