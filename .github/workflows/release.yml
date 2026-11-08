@@ -49,6 +49,8 @@ jobs:
 
       - name: Fetch C# bridge
         run: bash ./scripts/fetch-bridge.sh
+        env:
+          STARCLOUD_CLONE: "1"
 
       - name: Build AppImage + deb
         run: npm run package
