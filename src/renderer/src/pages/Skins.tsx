@@ -153,6 +153,11 @@ export default function SkinsPage(props: {
   const [renameValue, setRenameValue] = useState('')
   // 删除确认
   const [deleteTarget, setDeleteTarget] = useState<SkinEntry | null>(null)
+  // 正版换肤强制警告（A41 / Win 07 §3.8）：微软账户应用 / 取消使用 / 预置皮肤前先确认
+  const [msSkinConfirm, setMsSkinConfirm] = useState<{
+    account: GameAccount
+    skinId: string | null
+  } | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -321,8 +326,17 @@ export default function SkinsPage(props: {
     }
   }
 
-  /** 绑定到账户；skinId 空串 = 恢复账号默认形象（内核按空引用清空）。 */
+  /** 绑定到账户；skinId 空串 = 恢复账号默认形象（内核按空引用清空）。
+   *  微软正版先弹「正版账户换肤警告」确认（A41），其余类型直接走既有流程。 */
   async function bind(account: GameAccount, skinId: string | null): Promise<void> {
+    if (account.type === 'microsoft') {
+      setMsSkinConfirm({ account, skinId })
+      return
+    }
+    await doBind(account, skinId)
+  }
+
+  async function doBind(account: GameAccount, skinId: string | null): Promise<void> {
     setBusy(true)
     try {
       const model = selected === null ? 'auto' : normalizeModel(selected.model)
@@ -347,6 +361,9 @@ export default function SkinsPage(props: {
 
   /** 焦点账户（从账户详情进来时）：左栏的「应用到」直接对着它 */
   const focusAccount = accounts.find((a) => a.uuid === props.accountUuid)
+  // A40（Win 07 §3）：第三方账户的皮肤归皮肤站 —— 本地库操作整块收起，
+  // 只留皮肤站衣柜面板与只读预览；离线 / 正版 / 无焦点（独立皮肤库页）不受影响。
+  const focusSupportsLocalSkins = focusAccount === undefined || supportsLocalSkins(focusAccount)
 
   return (
     <div className="page">
@@ -378,19 +395,24 @@ export default function SkinsPage(props: {
       )}
       {props.embedded && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexShrink: 0 }}>
-          <button
-            className="btn"
-            onClick={() => {
-              setImportPathDraft('')
-              setImportOpen(true)
-            }}
-            disabled={busy}
-          >
-            导入本地文件…
-          </button>
-          <button className="btn" onClick={() => setUrlOpen(true)} disabled={busy}>
-            从链接导入…
-          </button>
+          {/* A40：第三方焦点账户只留只读预览 + 皮肤站衣柜，导入入口一并收起 */}
+          {focusSupportsLocalSkins && (
+            <>
+              <button
+                className="btn"
+                onClick={() => {
+                  setImportPathDraft('')
+                  setImportOpen(true)
+                }}
+                disabled={busy}
+              >
+                导入本地文件…
+              </button>
+              <button className="btn" onClick={() => setUrlOpen(true)} disabled={busy}>
+                从链接导入…
+              </button>
+            </>
+          )}
           <div style={{ flex: 1 }} />
           <button className="btn" onClick={() => void load()} disabled={loading}>
             <IconRefresh size={15} /> 刷新
@@ -421,113 +443,123 @@ export default function SkinsPage(props: {
                   </div>
                   <div className="t-cap">
                     {selected === null
-                      ? '在右侧衣柜里挑一张，小人会实时换装'
+                      ? focusSupportsLocalSkins
+                        ? '在右侧衣柜里挑一张，小人会实时换装'
+                        : '皮肤由认证服务器（皮肤站）提供，在下方衣柜里换装'
                       : `${selected.width}×${selected.height} · ${MODEL_LABEL[normalizeModel(selected.model)]} · ${SOURCE_LABEL[selected.source] ?? selected.source}`}
                   </div>
                 </div>
 
                 {selected !== null && focusAccount !== undefined && (
                   <div className="t-cap">
-                    {boundBy.get(focusAccount.uuid) === selected.id
-                      ? `${focusAccount.name} 正在使用这张皮肤`
-                      : `应用到 ${focusAccount.name} 后，下次启动游戏生效`}
+                    {/* A40：第三方账户皮肤归皮肤站，提示口径随 Win 07 §3 */}
+                    {!focusSupportsLocalSkins
+                      ? '皮肤由认证服务器（皮肤站）提供'
+                      : boundBy.get(focusAccount.uuid) === selected.id
+                        ? `${focusAccount.name} 正在使用这张皮肤`
+                        : `应用到 ${focusAccount.name} 后，下次启动游戏生效`}
                   </div>
                 )}
 
                 {selected !== null && (
                   <>
-                    <div>
-                      <div className="t-cap" style={{ marginBottom: 4 }}>
-                        型号
-                      </div>
-                      <Segmented<SkinModel>
-                        value={normalizeModel(selected.model)}
-                        options={MODEL_OPTIONS}
-                        disabled={busy}
-                        onChange={(v) => void setModel(v)}
-                      />
-                    </div>
+                    {/* A40：型号 / 绑定 / 重命名 / 删除都是本地库操作，第三方焦点账户收起 */}
+                    {focusSupportsLocalSkins && (
+                      <>
+                        <div>
+                          <div className="t-cap" style={{ marginBottom: 4 }}>
+                            型号
+                          </div>
+                          <Segmented<SkinModel>
+                            value={normalizeModel(selected.model)}
+                            options={MODEL_OPTIONS}
+                            disabled={busy}
+                            onChange={(v) => void setModel(v)}
+                          />
+                        </div>
 
-                    {/* 应用到该账户（Win：正版账户同样是本机注入，不动微软官方皮肤） */}
-                    {focusAccount !== undefined ? (
-                      boundBy.get(focusAccount.uuid) === selected.id ? (
-                        <button
-                          className="btn"
-                          disabled={busy}
-                          onClick={() => void bind(focusAccount, null)}
-                        >
-                          取消绑定（恢复默认形象）
-                        </button>
-                      ) : (
-                        <button
-                          className="btn btn-primary"
-                          style={{ fontWeight: 600 }}
-                          disabled={busy}
-                          onClick={() => void bind(focusAccount, selected.id)}
-                        >
-                          应用到 {focusAccount.name}
-                        </button>
-                      )
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div className="t-cap">绑定到账户</div>
-                        {bindableAccounts.length === 0 && (
-                          <div className="t-cap">
-                            还没有支持本地皮肤的账户（离线 / 微软账户）。
+                        {/* 应用到该账户（Win：正版账户同样是本机注入，不动微软官方皮肤） */}
+                        {focusAccount !== undefined ? (
+                          boundBy.get(focusAccount.uuid) === selected.id ? (
+                            <button
+                              className="btn"
+                              disabled={busy}
+                              onClick={() => void bind(focusAccount, null)}
+                            >
+                              取消绑定（恢复默认形象）
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-primary"
+                              style={{ fontWeight: 600 }}
+                              disabled={busy}
+                              onClick={() => void bind(focusAccount, selected.id)}
+                            >
+                              应用到 {focusAccount.name}
+                            </button>
+                          )
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <div className="t-cap">绑定到账户</div>
+                            {bindableAccounts.length === 0 && (
+                              <div className="t-cap">
+                                还没有支持本地皮肤的账户（离线 / 微软账户）。
+                              </div>
+                            )}
+                            {bindableAccounts.map((acc) => {
+                              const bound = boundBy.get(acc.uuid) === selected.id
+                              return (
+                                <div
+                                  key={acc.uuid}
+                                  className="row row-static"
+                                  style={{ minHeight: 0, padding: '6px 0' }}
+                                >
+                                  <span className="t-body truncate" style={{ flex: 1 }}>
+                                    {acc.name}
+                                  </span>
+                                  {bound ? (
+                                    <>
+                                      <span className="chip chip-accent">使用中</span>
+                                      <button
+                                        className="btn btn-subtle btn-sm"
+                                        disabled={busy}
+                                        onClick={() => void bind(acc, null)}
+                                      >
+                                        取消绑定
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      className="btn btn-sm"
+                                      disabled={busy}
+                                      onClick={() => void bind(acc, selected.id)}
+                                    >
+                                      应用
+                                    </button>
+                                  )}
+                                </div>
+                              )
+                            })}
                           </div>
                         )}
-                        {bindableAccounts.map((acc) => {
-                          const bound = boundBy.get(acc.uuid) === selected.id
-                          return (
-                            <div
-                              key={acc.uuid}
-                              className="row row-static"
-                              style={{ minHeight: 0, padding: '6px 0' }}
-                            >
-                              <span className="t-body truncate" style={{ flex: 1 }}>
-                                {acc.name}
-                              </span>
-                              {bound ? (
-                                <>
-                                  <span className="chip chip-accent">使用中</span>
-                                  <button
-                                    className="btn btn-subtle btn-sm"
-                                    disabled={busy}
-                                    onClick={() => void bind(acc, null)}
-                                  >
-                                    取消绑定
-                                  </button>
-                                </>
-                              ) : (
-                                <button
-                                  className="btn btn-sm"
-                                  disabled={busy}
-                                  onClick={() => void bind(acc, selected.id)}
-                                >
-                                  应用
-                                </button>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
 
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        className="btn"
-                        style={{ flex: 1 }}
-                        onClick={() => {
-                          setRenameTarget(selected)
-                          setRenameValue(selected.name)
-                        }}
-                      >
-                        重命名
-                      </button>
-                      <button className="btn btn-danger" onClick={() => setDeleteTarget(selected)}>
-                        删除
-                      </button>
-                    </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            className="btn"
+                            style={{ flex: 1 }}
+                            onClick={() => {
+                              setRenameTarget(selected)
+                              setRenameValue(selected.name)
+                            }}
+                          >
+                            重命名
+                          </button>
+                          <button className="btn btn-danger" onClick={() => setDeleteTarget(selected)}>
+                            删除
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
@@ -550,25 +582,30 @@ export default function SkinsPage(props: {
               <span className="card-title">我的皮肤</span>
               <span className="chip">{skins.length} 张</span>
               <div style={{ flex: 1 }} />
-              <span className="t-cap">点卡片试穿，再「应用」到账户</span>
+              <span className="t-cap">
+                {/* A40：第三方焦点账户下本地库只读，只保留浏览 */}
+                {focusSupportsLocalSkins ? '点卡片试穿，再「应用」到账户' : '只读预览：点卡片查看，换装走皮肤站衣柜'}
+              </span>
             </div>
             <div style={{ padding: '0 14px 14px' }}>
               {loading && <SkeletonList rows={3} avatar />}
               {!loading && (
                 <div className="skin-grid">
-                  {/* 添加皮肤占位卡（Win 首格） */}
-                  <button
-                    className="skin-card skin-add"
-                    onClick={() => {
-                      setImportPathDraft('')
-                      setImportOpen(true)
-                    }}
-                    disabled={busy}
-                    title="导入本地皮肤"
-                  >
-                    <span style={{ fontSize: 26, opacity: 0.55, lineHeight: 1 }}>＋</span>
-                    <span className="t-cap">添加皮肤</span>
-                  </button>
+                  {/* 添加皮肤占位卡（Win 首格）；第三方焦点账户下是导入入口，收起 */}
+                  {focusSupportsLocalSkins && (
+                    <button
+                      className="skin-card skin-add"
+                      onClick={() => {
+                        setImportPathDraft('')
+                        setImportOpen(true)
+                      }}
+                      disabled={busy}
+                      title="导入本地皮肤"
+                    >
+                      <span style={{ fontSize: 26, opacity: 0.55, lineHeight: 1 }}>＋</span>
+                      <span className="t-cap">添加皮肤</span>
+                    </button>
+                  )}
                   {skins.map((skin) => {
                     const icon = icons[skin.id]
                     const usedBy = accounts.filter((acc) => boundBy.get(acc.uuid) === skin.id)
@@ -774,6 +811,43 @@ export default function SkinsPage(props: {
         <div className="dialog-body">
           将删除皮肤 <b>{deleteTarget?.name}</b> 及其纹理文件。
           正在使用它的账户会自动恢复默认形象。
+        </div>
+      </Modal>
+
+      {/* 正版换肤强制警告（A41 / Win 07 §3.8）：微软账户应用 / 取消使用 / 预置皮肤前确认。
+          Win 默认按钮=取消（DefaultButton=Close），这里同样把「取消」放首位。 */}
+      <Modal
+        open={msSkinConfirm !== null}
+        title="正版账户换肤警告"
+        onClose={() => setMsSkinConfirm(null)}
+        width={460}
+        footer={
+          <>
+            <button
+              className="btn"
+              autoFocus
+              onClick={() => setMsSkinConfirm(null)}
+            >
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontWeight: 600 }}
+              onClick={() => {
+                const c = msSkinConfirm
+                setMsSkinConfirm(null)
+                if (c !== null) void doBind(c.account, c.skinId)
+              }}
+            >
+              我已了解，仍然更换
+            </button>
+          </>
+        }
+      >
+        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>
+          {
+            '这是微软正版账户，本次操作只影响本机：\n\n• 只改你本机看到的形象：启动器里的预览一定生效；游戏内 1.19.2 及更早版本直接生效，1.19.3 起客户端要求签名属性，本机注入不保证生效。\n• 不会修改、上传或删除微软账号上的官方皮肤。\n• 其他玩家看到的仍然是你微软账号上的官方皮肤。\n• 下次用启动器启动游戏时才生效。\n\n每次更换都会再确认一次。'
+          }
         </div>
       </Modal>
 

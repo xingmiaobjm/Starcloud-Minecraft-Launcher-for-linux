@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { request } from '../bridge'
 import type { SaveInfo, SaveList } from '../bridge'
 import { EmptyState, Modal, SkeletonList, useToasts, Select } from '../ui'
-import { IconRefresh, IconWorld } from '../icons'
+import { IconRefresh, IconWorld, IconTrash } from '../icons'
 
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B'
@@ -65,6 +65,8 @@ export default function SavesPage(props: {
   const [busy, setBusy] = useState(false)
   /** 复制到其他版本：选目标版本 */
   const [copyTarget, setCopyTarget] = useState<string | null>(null)
+  /** 删除世界确认弹窗（Win 04 §1.5 #1：默认取消；行内入口单删，工具栏入口批量删） */
+  const [delTargets, setDelTargets] = useState<SaveInfo[] | null>(null)
 
   // 选中/缩略图的键必须带 gameRoot：版本隔离下每个版本都有自己的
   // saves/新世界，只按 folderName 记录会一点选一片（用户实测：点一个亮四个）。
@@ -226,6 +228,39 @@ export default function SavesPage(props: {
       setBusy(false)
     }
   }
+
+  /**
+   * 删除世界（桥接 saves.delete，Win `_s.Saves.Delete(GameRoot, FolderName)` 同款）：
+   * 逐个删除并统计释放体积；后端也有守卫（游戏运行中拒绝删除），报错原样透出。
+   */
+  async function doDeleteWorlds(): Promise<void> {
+    const targets = delTargets
+    setDelTargets(null)
+    if (targets === null || targets.length === 0) return
+    setBusy(true)
+    try {
+      let freed = 0
+      for (const t of targets) {
+        const r = await request<{ freedBytes: number }>('saves.delete', {
+          gameRoot: t.gameRoot,
+          folderName: t.folderName
+        })
+        freed += r.freedBytes
+      }
+      push(
+        'success',
+        targets.length === 1
+          ? `已删除「${targets[0].levelName}」（释放 ${formatBytes(freed)}）`
+          : `已删除 ${targets.length} 个世界（释放 ${formatBytes(freed)}）`
+      )
+      await load()
+    } catch (e) {
+      push('error', `删除失败：${String(e)}`)
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
   const tplBtn = (
     label: string,
     onClick: () => void,
@@ -272,6 +307,10 @@ export default function SavesPage(props: {
         {tplBtn('分享', () => void exportShare(), {
           disabled: selectedSaves.length !== 1,
           title: '导出为世界分享包（zip），对方导入即可'
+        })}
+        {tplBtn('删除', () => setDelTargets(selectedSaves), {
+          disabled: selectedSaves.length === 0,
+          title: '删除选中的世界（默认取消，需确认）'
         })}
         <div style={{ width: 1, height: 24, background: 'var(--stroke-divider)' }} />
         <input
@@ -349,11 +388,58 @@ export default function SavesPage(props: {
                   <span className="meta-k">大小</span>
                   <span className="meta-v">{formatBytes(s.sizeBytes)}</span>
                 </div>
+                {/* 行内删除入口（Win 04 差异 #2：存档页原本完全没有删除入口） */}
+                <button
+                  className="btn btn-subtle btn-sm btn-danger"
+                  title={`删除「${s.levelName}」`}
+                  disabled={busy}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setDelTargets([s])
+                  }}
+                >
+                  <IconTrash size={15} />
+                </button>
               </div>
             )
           })}
         </div>
       </div>
+
+      {/* 删除世界确认（Win 04 §1.5 #1 文案照抄：Title「删除世界」，按钮 删除/取消，默认取消） */}
+      <Modal
+        open={delTargets !== null}
+        title="删除世界"
+        onClose={() => setDelTargets(null)}
+        footer={
+          <>
+            <button className="btn" onClick={() => setDelTargets(null)}>
+              取消
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ background: 'var(--danger)', color: '#fff' }}
+              onClick={() => void doDeleteWorlds()}
+            >
+              删除
+            </button>
+          </>
+        }
+      >
+        <div className="dialog-body">
+          {delTargets !== null && delTargets.length === 1 ? (
+            <>
+              确定要删除「<b>{delTargets[0].levelName}</b>」吗？
+            </>
+          ) : (
+            <>
+              确定要删除「<b>{delTargets?.[0]?.levelName}</b>」等 {delTargets?.length} 个世界吗？
+            </>
+          )}
+          <br />
+          世界文件夹将被移除，建议先备份。此操作不可恢复。
+        </div>
+      </Modal>
 
       {/* 复制到其他版本：选目标版本 */}
       <Modal

@@ -2,14 +2,16 @@
 /// 规格对齐 Win 端 HomePage.xaml：
 /// · 左栏 Grid "* / 360"，四行 = 启动自检 → 插件挂载 → 首页卡片 → 版本列表卡
 /// · 版本行 Grid "Auto / 260px 1fr auto"：32px 方块图标 + 名称(260) + 芯片 + 两行数据列
-/// · 版本行右键菜单：问 Nova / 版本详情 / 打开游戏目录 / 删除此版本
+/// · 版本行右键菜单（Win 02 §2.1）：启动 / 打开详细信息 / 三个文件夹入口 · 置顶收藏 · 删除此版本
+/// · 启动按钮状态机（Win 02 §2.4）：启动游戏 / 启动中（禁用）/ 停止游戏（运行中可点）
+/// · 卡头视图切换 + 行尾置顶/收藏双图标（Win 02 §2.2）
 /// · 右栏：正版/外置/离线 三段滑动指示器 + 头像 + 品牌黄大启动按钮（右侧下拉段）
 import { useEffect, useState } from 'react'
 
 import { request } from '../bridge'
 import type { AccountList, GameAccount, InstalledVersion } from '../bridge'
 import type { GameSessionApi } from '../state/session'
-import { Segmented, useContextMenu, useToasts } from '../ui'
+import { Modal, Segmented, useContextMenu, useToasts } from '../ui'
 import grassIcon from '../assets/mc-icons/natural_grass_block.png'
 import amethystIcon from '../assets/mc-icons/block_of_amethyst.png'
 import cobbleIcon from '../assets/mc-icons/masonry_cobblestone.png'
@@ -29,6 +31,13 @@ const MODE_LABEL: Record<Mode, string> = {
   offline: '离线'
 }
 
+/** 无账户时通栏就地登录按钮文案（Win 02 §2.5 NoAccountBtn，按模式三态）。 */
+const NO_ACCOUNT_LABEL: Record<Mode, string> = {
+  microsoft: '登录微软账户',
+  external: '登录第三方账户',
+  offline: '添加离线账户'
+}
+
 /**
  * 版本行图标（对齐 Win 端 VersionRowHelpers）：
  * 加载器图标优先（neoforge/forge/fabric/quilt），原版按版本类型
@@ -46,6 +55,38 @@ const TYPE_ICONS: Record<string, string> = {
   snapshot: amethystIcon,
   old_beta: cobbleIcon,
   old_alpha: dirtIcon
+}
+
+// ── 行尾标记图标（Win 02 §1.4：置顶 E909 实心图钉 / 收藏 EC4D 圆角五角星；
+// icons.tsx 没有这两枚，这里内联小 SVG，风格与 FontIcon 近似） ──
+
+function IconPinGlyph(props: { size?: number }): JSX.Element {
+  const s = props.size ?? 14
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M14.2 2.5a1.3 1.3 0 0 1 1.3 1.3v1.6l-.3 1.2 3.1 3.1c.5.5.15 1.4-.57 1.4h-4.4l-.45 6.6a1.15 1.15 0 0 1-2.3 0l-.45-6.6H5.77c-.72 0-1.07-.9-.57-1.4l3.1-3.1-.3-1.2V3.8a1.3 1.3 0 0 1 1.3-1.3h5.2z" />
+      <path d="M11.4 18.2h1.2l.2 3a.8.8 0 0 1-1.6 0l.2-3z" />
+    </svg>
+  )
+}
+
+function IconStarGlyph(props: { size?: number }): JSX.Element {
+  const s = props.size ?? 14
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 2.6l2.77 5.9 6.28.83-4.6 4.42 1.18 6.25L12 16.98l-5.63 3.02 1.18-6.25-4.6-4.42 6.28-.83L12 2.6z" />
+    </svg>
+  )
+}
+
+/** 停止轮廓（Win 02 §2.4 运行中「停止游戏」的停止轮廓 Path）。 */
+function IconStopGlyph(props: { size?: number }): JSX.Element {
+  const s = props.size ?? 15
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <rect x={5.5} y={5.5} width={13} height={13} rx={2} />
+    </svg>
+  )
 }
 
 function iconFor(version: { id: string; loader?: string; type?: string }): string {
@@ -157,6 +198,10 @@ export default function HomePage(props: {
   const [cardMode, setCardMode] = useState<'installed' | 'favorites' | 'pinned'>('installed')
   /** 右键菜单当前指向的版本（置顶/收藏按它切换，与 Win VersionMenu_Opening 同口径） */
   const [menuRow, setMenuRow] = useState<string | undefined>()
+  /** 停止游戏确认弹窗（Win RunningStatusPage Kill_Click 同款文案） */
+  const [stopConfirm, setStopConfirm] = useState<{ id: string; pid: number } | null>(null)
+  /** 首页「删除此版本」确认弹窗（Win 02 §2.1 #8：Title 删除版本，默认取消） */
+  const [deleteRow, setDeleteRow] = useState<string | null>(null)
 
   async function reload(): Promise<void> {
     setLoading(true)
@@ -221,8 +266,36 @@ export default function HomePage(props: {
     account === undefined ? '' : account.type === 'microsoft' ? account.uuid : account.name
   const avatarUrl = avatarId === '' ? null : 'https://minotar.net/helm/' + encodeURIComponent(avatarId) + '/128'
   const running = session.pid !== undefined && session.pid > 0
-  const canLaunch =
-    !session.launching && !running && selected !== undefined && account !== undefined
+  // Win 02 §2.4：按钮 IsEnabled = isRunning || id != null —— 运行中可点（停止），
+  // 启动中一律禁用，其余只在「没选版本 / 没有可用账户」时禁用
+  const launchReady = selected !== undefined && account !== undefined
+
+  /**
+   * 启动按钮 / 右键「启动」共用的同一条链路（Win LaunchBtn_Click）：
+   * 先选中该版本；正在运行 → 弹「结束游戏进程」确认后 game.kill；
+   * 没在跑 → 走 session.launch。
+   */
+  function launchOrStop(id?: string): void {
+    if (id === undefined || session.launching) return
+    setSelected(id)
+    if (running) {
+      setStopConfirm({ id: session.launchVersion ?? id, pid: session.pid ?? 0 })
+      return
+    }
+    const acct = account
+    if (acct === undefined) {
+      // Win 端就地弹登录框；Linux 口径是跳账户页登录（与 B4 通栏按钮同入口）
+      push('info', '当前模式还没有账户，请先登录')
+      props.onNavigate('accounts')
+      return
+    }
+    void session.launch({
+      versionId: id,
+      playerName: acct.name,
+      accountUuid: acct.uuid,
+      loginMode: MODE_LABEL[mode]
+    })
+  }
 
   /** 置顶 / 收藏开关（Win ToggleVersionFlag 同款：写实例档案后本地重排） */
   function toggleMark(id: string | undefined, key: 'pinned' | 'favorite'): void {
@@ -239,45 +312,64 @@ export default function HomePage(props: {
     })
   }
 
+  /**
+   * 右键菜单的文件夹入口：作用于右键的那一行（menuRow），不是选中的版本
+   * （Win 02 差异 #2 指出的作用行错位就在这里修）。
+   */
+  function openRowFolder(kind: 'version' | 'saves' | 'mods'): void {
+    if (menuRow === undefined) return
+    void request('versions.openFolder', { versionId: menuRow, kind }).catch((e) =>
+      push('error', String(e))
+    )
+  }
+
+  /** 卡头视图切换（Win 02 §2.2 HomeVersionCardMode）：本地生效 + 落盘下次进页沿用。 */
+  function changeCardMode(next: 'installed' | 'favorites' | 'pinned'): void {
+    setCardMode(next)
+    void request('settings.apply', { homeVersionCardMode: next }).catch(() => undefined)
+  }
+
+  // 右键菜单全部按 Win 02 §2.1 的 8 项与顺序（问 Nova 是 Linux 侧补充项，排在文件夹入口之后）
+  const menuTargetRow = menuRow !== undefined ? installed.find((v) => v.id === menuRow) : undefined
   const menu = useContextMenu([
+    { label: '启动', onSelect: () => launchOrStop(menuRow) },
+    { label: '打开详细信息', onSelect: () => props.onNavigate('versions') },
+    { label: '打开版本文件夹', onSelect: () => openRowFolder('version') },
+    { label: '打开存档文件夹', onSelect: () => openRowFolder('saves') },
+    { label: '打开模组文件夹', onSelect: () => openRowFolder('mods') },
     { label: '问 Nova', onSelect: () => props.onNavigate('nova') },
-    { label: '版本详情', onSelect: () => props.onNavigate('versions') },
+    { label: '', separator: true },
     {
-      label: '打开游戏目录',
-      onSelect: () => {
-        if (selected === undefined) return
-        void request('versions.openFolder', { versionId: selected }).catch((e) =>
-          push('error', String(e))
-        )
-      }
-    },
-    {
-      label: menuRow !== undefined && installed.find((v) => v.id === menuRow)?.pinned === true
-        ? '取消置顶'
-        : '置顶',
+      label: menuTargetRow?.pinned === true ? '取消置顶' : '置顶',
       onSelect: () => toggleMark(menuRow, 'pinned')
     },
     {
-      label: menuRow !== undefined && installed.find((v) => v.id === menuRow)?.favorite === true
-        ? '取消收藏'
-        : '收藏',
+      label: menuTargetRow?.favorite === true ? '取消收藏' : '收藏',
       onSelect: () => toggleMark(menuRow, 'favorite')
     },
+    { label: '', separator: true },
     {
       label: '删除此版本',
       danger: true,
       onSelect: () => {
-        if (selected === undefined) return
-        const target = selected
-        void request<{ freedBytes: number }>('versions.delete', { versionId: target })
-          .then((r) => {
-            push('success', `已删除 ${target}（释放 ${fmtSize(r.freedBytes)}）`)
-            return reload()
-          })
-          .catch((e) => push('error', String(e)))
+        if (menuRow === undefined) return
+        setDeleteRow(menuRow)
       }
     }
   ])
+
+  /** 首页「删除此版本」确认后的执行（Win 02 §2.1 #8）。 */
+  function doDeleteRow(): void {
+    const target = deleteRow
+    setDeleteRow(null)
+    if (target === null) return
+    void request<{ freedBytes: number }>('versions.delete', { versionId: target })
+      .then((r) => {
+        push('success', `已删除 ${target}（释放 ${fmtSize(r.freedBytes)}）`)
+        return reload()
+      })
+      .catch((e) => push('error', String(e)))
+  }
 
   /** 按设置过滤主页列表（installed / favorites / pinned）。 */
   const visibleVersions = installed.filter((v) =>
@@ -287,10 +379,16 @@ export default function HomePage(props: {
         ? v.pinned === true
         : true
   )
+  // 卡头标题按视图同步（Win VersionCardText 同口径：收藏的版本 / 置顶的版本）
   const CARD_TITLE: Record<typeof cardMode, string> = {
     installed: '已安装版本',
-    favorites: '收藏版本',
-    pinned: '置顶版本'
+    favorites: '收藏的版本',
+    pinned: '置顶的版本'
+  }
+  const CARD_MODE_LABEL: Record<typeof cardMode, string> = {
+    installed: '已安装',
+    favorites: '收藏',
+    pinned: '置顶'
   }
 
   const statusColor = running
@@ -317,6 +415,23 @@ export default function HomePage(props: {
                 <span className="card-title">{CARD_TITLE[cardMode]}</span>
                 <span className="chip">{visibleVersions.length}</span>
                 <div style={{ flex: 1 }} />
+                {/* 视图切换（Win 02 §2.2 HomeVersionCardMode：已安装 / 收藏 / 置顶，
+                    收藏·置顶两档用小图标 + 文案；切换即落盘 settings.apply） */}
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {(['installed', 'favorites', 'pinned'] as const).map((m) => (
+                    <button
+                      key={m}
+                      className={`btn btn-sm${cardMode === m ? ' btn-primary' : ' btn-subtle'}`}
+                      style={{ padding: '0 8px', height: 26 }}
+                      title={`查看${CARD_TITLE[m]}`}
+                      onClick={() => changeCardMode(m)}
+                    >
+                      {m === 'favorites' && <IconStarGlyph size={12} />}
+                      {m === 'pinned' && <IconPinGlyph size={12} />}
+                      {CARD_MODE_LABEL[m]}
+                    </button>
+                  ))}
+                </div>
                 <button
                   className="btn btn-subtle btn-sm"
                   onClick={() => void reload()}
@@ -381,9 +496,9 @@ export default function HomePage(props: {
                         className={`row${isSelected ? ' row-active' : ''}`}
                         style={{
                           animationDelay: `${index * 39}ms`,
-                          // Win 端列宽：图标 Auto / 名称 260 / 芯片 * / 数据 Auto
+                          // Win 端列宽：图标 Auto / 名称 260 / 芯片 * / 数据 Auto / 行尾标记 Auto
                           display: 'grid',
-                          gridTemplateColumns: 'auto minmax(120px, 260px) minmax(0, 1fr) auto',
+                          gridTemplateColumns: 'auto minmax(120px, 260px) minmax(0, 1fr) auto auto',
                           columnGap: 12
                         }}
                         onClick={() => setSelected(version.id)}
@@ -410,6 +525,21 @@ export default function HomePage(props: {
                             </>
                           )}
                         </div>
+                        {/* 行尾置顶/收藏双图标（Win 02 §1.4：置顶在前、收藏在后，只有设置过才出现） */}
+                        {(version.pinned === true || version.favorite === true) && (
+                          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            {version.pinned === true && (
+                              <span title="置顶" style={{ color: 'var(--accent)', display: 'flex' }}>
+                                <IconPinGlyph size={14} />
+                              </span>
+                            )}
+                            {version.favorite === true && (
+                              <span title="收藏" style={{ color: 'var(--accent)', display: 'flex' }}>
+                                <IconStarGlyph size={14} />
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </div>
                     </div>
                   )
@@ -498,7 +628,15 @@ export default function HomePage(props: {
                   {account?.name ?? '未选择账户'}
                 </div>
                 {account === undefined && (
-                  <div className="t-cap">去「账户」页添加{MODE_LABEL[mode]}账户</div>
+                  // 无账户通栏就地登录按钮（Win 02 §1.5 NoAccountBtn：高 32 通栏，
+                  // 文案按模式三态；Linux 口径点击跳账户页完成登录）
+                  <button
+                    className="btn"
+                    style={{ height: 32, width: '100%' }}
+                    onClick={() => props.onNavigate('accounts')}
+                  >
+                    {NO_ACCOUNT_LABEL[mode]}
+                  </button>
                 )}
                 {account !== undefined && modeAccounts.length > 1 && (
                   <div
@@ -544,7 +682,8 @@ export default function HomePage(props: {
               )}
 
               {/* 启动按钮：主段 + 下拉段（对齐 Win 端 HomePage 的按钮组）
-                  两段必须同高同圆角，下拉段是主段的"同组深一档"，不是灰按钮 */}
+                  两段必须同高同圆角，下拉段是主段的"同组深一档"，不是灰按钮。
+                  状态机（Win 02 §2.4）：启动游戏 → 启动中（禁用）→ 停止游戏（运行中可点） */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
                 <button
                   className="btn btn-primary"
@@ -562,23 +701,19 @@ export default function HomePage(props: {
                         ? 'none'
                         : '0 4px 22px rgba(255,211,34,0.28)'
                   }}
-                  disabled={!canLaunch}
-                  onClick={() => {
-                    if (selected === undefined || account === undefined) return
-                    void session.launch({
-                      versionId: selected,
-                      playerName: account.name,
-                      accountUuid: account.uuid,
-                      loginMode: MODE_LABEL[mode]
-                    })
-                  }}
+                  disabled={session.launching || (!running && !launchReady)}
+                  onClick={() => launchOrStop(selected)}
                 >
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconPlay size={15} />{' '}
+                    {running && !session.launching ? (
+                      <IconStopGlyph size={15} />
+                    ) : (
+                      <IconPlay size={15} />
+                    )}{' '}
                     {session.launching
                       ? '启动中…'
                       : running
-                        ? '游戏运行中'
+                        ? '停止游戏'
                         : '启动游戏'}
                   </span>
                   <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.72 }}>
@@ -601,6 +736,63 @@ export default function HomePage(props: {
             </div>
           </div>
         )}
+
+        {/* 停止游戏确认（文案照抄 Win RunningStatusPage Kill_Click：
+            Title「结束游戏进程」Content「将强制结束 {0}（PID {1}），未保存的进度会丢失。」） */}
+        <Modal
+          open={stopConfirm !== null}
+          title="结束游戏进程"
+          onClose={() => setStopConfirm(null)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setStopConfirm(null)}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ background: 'var(--danger)', color: '#fff' }}
+                onClick={() => {
+                  setStopConfirm(null)
+                  void session.kill()
+                }}
+              >
+                结束进程
+              </button>
+            </>
+          }
+        >
+          <div className="dialog-body">
+            将强制结束 <b>{stopConfirm?.id}</b>（PID {stopConfirm?.pid}），未保存的进度会丢失。
+          </div>
+        </Modal>
+
+        {/* 首页「删除此版本」确认（Win 02 §2.1 #8：Title 删除版本、按钮 删除/取消 默认取消；
+            首页无「运行中禁止删除」守卫，与版本页不同） */}
+        <Modal
+          open={deleteRow !== null}
+          title="删除版本"
+          onClose={() => setDeleteRow(null)}
+          footer={
+            <>
+              <button className="btn" onClick={() => setDeleteRow(null)}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ background: 'var(--danger)', color: '#fff' }}
+                onClick={() => doDeleteRow()}
+              >
+                删除
+              </button>
+            </>
+          }
+        >
+          <div className="dialog-body">
+            确定要删除版本 <b>{deleteRow}</b> 吗？
+            <br />
+            将删除其版本文件夹，此操作不可恢复。
+          </div>
+        </Modal>
       {menu.node}
       {host}
     </div>

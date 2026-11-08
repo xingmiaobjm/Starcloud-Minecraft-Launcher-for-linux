@@ -2,7 +2,7 @@
 /// 主题跟随系统（Win 端 nativeTheme → 这里 data-theme）。
 import { useEffect, useState } from 'react'
 
-import { appVersion as readAppVersion, nativeApi, request } from './bridge'
+import { appVersion as readAppVersion, nativeApi, onBridgeEvent, request } from './bridge'
 import type { InstalledVersion } from './bridge'
 
 import Nav, { PAGE_LABEL, type PageKey } from './nav'
@@ -27,10 +27,20 @@ import AccountsPage from './pages/Accounts'
 import PluginsPage from './pages/Plugins'
 import NovaPage from './pages/Nova'
 import NovaChatPanel from './NovaChatPanel'
+import type { NovaRuntimeState } from './NovaChatPanel'
 import SettingsPage from './pages/Settings'
 import LogsPage from './pages/Logs'
 
 import brandMark from './assets/brand/starcloud-mark-small.svg'
+
+/** Win 09#17 Orb 五态着色：StateText 文案与外圈描边色（待命次级灰/思考星云紫/提案琥珀/观察品牌深绿/离线暗灰）。 */
+const NOVA_STATE_META: Record<NovaRuntimeState, { label: string; ring: string }> = {
+  idle: { label: '待命', ring: 'var(--text-secondary)' },
+  thinking: { label: '思考中…', ring: '#7C3AED' },
+  hasPlan: { label: '有提案', ring: '#F59E0B' },
+  observing: { label: '观察中', ring: '#3DD322' },
+  offline: { label: '离线', ring: 'var(--text-disabled)' }
+}
 
 
 export default function App(props: { initialTheme: import("./theme").ResolvedTheme }): JSX.Element {
@@ -43,6 +53,10 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
   const [novaPanelOpen, setNovaPanelOpen] = useState(false)
   // 「问 Nova」的预填文本（版本行菜单 / 好友页 → 面板输入框）
   const [novaSeed, setNovaSeed] = useState('')
+  // Nova 五态（Win 09#17）：面板上报的本地推导态 + 桥接 nova.state 覆盖 + 登录基线
+  const [novaPanelState, setNovaPanelState] = useState<NovaRuntimeState | null>(null)
+  const [novaBridgeState, setNovaBridgeState] = useState<NovaRuntimeState | null>(null)
+  const [novaSignedOut, setNovaSignedOut] = useState(false)
   /** 已安装版本 id 列表（复制存档到其他版本用） */
   const [installedVersions, setInstalledVersions] = useState<string[]>([])
 
@@ -63,6 +77,32 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
     window.appEvents?.onNavigate(onNavigate)
     return () => undefined
   }, [])
+
+  // Nova 运行态：登录基线（未登录 = Win 端 Offline 态）+ 桥接 nova.state 事件。
+  // 桥接暂未下发 nova.state——事件将来到来时以此为准，覆盖面板本地推导的态。
+  useEffect(() => {
+    void request<{ loggedIn: boolean }>('starcloud.state')
+      .then((s) => setNovaSignedOut(s.loggedIn !== true))
+      .catch(() => undefined)
+    onBridgeEvent((event, params) => {
+      if (event !== 'nova.state') return
+      const s = String(params.state ?? '')
+      if (s === 'offline' || s === 'idle' || s === 'thinking' || s === 'hasPlan' || s === 'observing') {
+        setNovaBridgeState(s)
+      }
+    })
+  }, [])
+
+  /** 收回 Nova 面板：预填文本与面板上报态一并清掉（态回落到登录基线，防 Orb 卡在旧态）。 */
+  const closeNovaPanel = (): void => {
+    setNovaPanelOpen(false)
+    setNovaSeed('')
+    setNovaPanelState(null)
+  }
+  // 生效态：桥接 nova.state > 面板上报 > 登录基线（offline / idle）
+  const novaState =
+    novaBridgeState ?? novaPanelState ?? (novaSignedOut ? 'offline' : 'idle')
+  const novaMeta = NOVA_STATE_META[novaState]
   const [appVersion, setAppVersion] = useState('')
 
   useEffect(() => {
@@ -207,14 +247,42 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
         actions={
           <>
             {/* 自绘标题栏快捷入口（Win 端：Nova / 调度中心 / 账户） */}
+            {/* Win 09#17 NovaOrb：外圈按五态着色，HasPlan 态右上角 8px 琥珀圆点，Tip「Nova：{态}」 */}
             <button
               className="tb-action-btn"
-              title="Nova 助手"
-              aria-label="Nova 助手"
+              title={`Nova：${novaMeta.label}`}
+              aria-label={`Nova：${novaMeta.label}`}
               onClick={() => setNovaPanelOpen((v) => !v)}
             >
-              {/* Nova = 品牌标记（多色，画不出字形） */}
-              <img src={brandMark} alt="" width={16} height={16} />
+              <span
+                style={{
+                  position: 'relative',
+                  width: 22,
+                  height: 22,
+                  borderRadius: '50%',
+                  border: `1.5px solid ${novaMeta.ring}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                {/* Nova = 品牌标记（多色，画不出字形） */}
+                <img src={brandMark} alt="" width={14} height={14} />
+                {novaState === 'hasPlan' && (
+                  <span
+                    aria-hidden
+                    style={{
+                      position: 'absolute',
+                      top: -2,
+                      right: -2,
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: '#F59E0B'
+                    }}
+                  />
+                )}
+              </span>
             </button>
             <button
               className="tb-action-btn"
@@ -278,19 +346,14 @@ export default function App(props: { initialTheme: import("./theme").ResolvedThe
       {/* Nova 顶栏弹出面板（Win 端 NovaPopup：Orb 下方 8px、右对齐 440px、轻触关闭） */}
       {novaPanelOpen && (
         <>
-          <div
-            className="popup-scrim"
-            onClick={() => {
-              setNovaPanelOpen(false)
-              setNovaSeed('')
-            }}
-          />
+          <div className="popup-scrim" onClick={closeNovaPanel} />
           <div className="nova-flyout">
             <NovaChatPanel
               seed={novaSeed}
+              // 面板本地推导的五态上报（Win 09#17：NovaRuntime → Orb 着色）
+              onStateChange={setNovaPanelState}
               onGoSettings={() => {
-                setNovaPanelOpen(false)
-                setNovaSeed('')
+                closeNovaPanel()
                 setPage('nova')
               }}
             />

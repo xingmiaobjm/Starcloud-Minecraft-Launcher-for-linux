@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { request, nativeApi } from '../bridge'
 import type { ProjectionPreview } from '../bridge'
 import ProjectionViewer from '../projectionViewer'
-import { ColorTextTool } from './labTools'
+import { ColorTextTool, WorldEaterTool } from './labTools'
 import { EmptyState, PageShell, SkeletonList, useToasts } from '../ui'
 import { IconList, IconSettings, IconClose, IconWarning, IconRefresh } from '../icons'
 
@@ -581,6 +581,8 @@ export default function LabPage() {
             />
           </div>
         )}
+        {/* 世吞生成器（Win 0.4.x：参数化 6 项 + TNT 估算，入口常驻投影工坊） */}
+        <WorldEaterTool />
         {host}
           </div>
         </div>
