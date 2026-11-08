@@ -9,10 +9,10 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "electron-vite preview",
-    "package": "electron-vite build && electron-builder --config electron-builder.yml --linux",
-    "package:appimage": "electron-vite build && electron-builder --config electron-builder.yml --linux AppImage",
-    "package:deb": "electron-vite build && electron-builder --config electron-builder.yml --linux deb",
-    "package:dir": "electron-vite build && electron-builder --config electron-builder.yml --linux --dir",
+    "package": "electron-vite build && electron-builder --config electron-builder.yml --linux --publish never",
+    "package:appimage": "electron-vite build && electron-builder --config electron-builder.yml --linux AppImage --publish never",
+    "package:deb": "electron-vite build && electron-builder --config electron-builder.yml --linux deb --publish never",
+    "package:dir": "electron-vite build && electron-builder --config electron-builder.yml --linux --dir --publish never",
     "dev:web": "vite --port 5173 --open"
   },
   "dependencies": {
