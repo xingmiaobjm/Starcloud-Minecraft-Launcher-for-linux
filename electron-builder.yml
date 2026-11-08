@@ -34,7 +34,11 @@ linux:
       Categories: Game;
       MimeType: x-scheme-handler/starcloud;
 
+appImage:
+  artifactName: ${name}-${version}.${ext}
+  
 deb:
+  compression: gz
   depends:
     - libgtk-3-0 | libgtk-3-0t64
     - libnotify4
