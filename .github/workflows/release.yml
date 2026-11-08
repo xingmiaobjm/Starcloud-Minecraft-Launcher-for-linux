@@ -7,8 +7,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '要重新构建的已有标签 (例如 v0.3.8-beta.8)'
+        description: '要构建的已有标签 (例如 v0.3.8-beta.8)'
         required: true
+      dry_run:
+        description: '只构建，不上传 Release'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -45,8 +49,8 @@ jobs:
         run: npm ci
 
       - name: Fetch C# bridge
-        run: ./scripts/fetch-bridge.sh
-        
+        run: bash ./scripts/fetch-bridge.sh
+
       - name: Build AppImage + deb
         run: npm run package
         env:
@@ -62,14 +66,24 @@ jobs:
           echo "appimage_name=$(basename ${APPIMAGE})" >> $GITHUB_OUTPUT
           echo "deb_name=$(basename ${DEB})" >> $GITHUB_OUTPUT
 
+      - name: Upload build artifacts (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            ${{ steps.artifacts.outputs.appimage }}
+            ${{ steps.artifacts.outputs.deb }}
+          retention-days: 7
+
       - name: Upload to Release
+        if: ${{ !inputs.dry_run }}
         uses: softprops/action-gh-release@v3
         with:
           files: |
             ${{ steps.artifacts.outputs.appimage }}
             ${{ steps.artifacts.outputs.deb }}
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+          prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, 'beta') || contains(github.event.inputs.tag || github.ref_name, 'alpha') }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
