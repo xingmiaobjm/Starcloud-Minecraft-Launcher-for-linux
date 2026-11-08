@@ -12,10 +12,13 @@ on:
       dry_run:
         description: '只构建，不上传 Release'
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: write
+
+env:
+  ELECTRON_MIRROR: "https://npmmirror.com/mirrors/electron/"
 
 jobs:
   build-and-release:
@@ -33,6 +36,11 @@ jobs:
           node-version: 20
           cache: 'npm'
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
       - name: Install system dependencies for fpm/deb
         run: |
           sudo apt-get update
@@ -46,14 +54,19 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
+        env:
+          ELECTRON_MIRROR: "https://npmmirror.com/mirrors/electron/"
 
       - name: Fetch C# bridge
-        run: bash ./scripts/fetch-bridge.sh
+        run: bash ./scripts/fetch-bridge.sh --from-https
+        env:
+          STARCLOUD_CLONE: "1"
 
       - name: Build AppImage + deb
         run: npm run package
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ELECTRON_MIRROR: "https://npmmirror.com/mirrors/electron/"
 
       - name: Locate build artifacts
         id: artifacts
