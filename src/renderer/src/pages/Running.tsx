@@ -547,7 +547,7 @@ export default function RunningPage(props: {
 
 function ConfigRow(props: { label: string; value: string; mono?: boolean }): JSX.Element {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '120px minmax(0, 1fr)', gap: 12, padding: '4px 0' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, 120px) minmax(0, 1fr)', gap: 12, padding: '4px 0' }}>
       <span className="t-cap" style={{ fontSize: 12 }}>{props.label}</span>
       <span
         className="t-body"

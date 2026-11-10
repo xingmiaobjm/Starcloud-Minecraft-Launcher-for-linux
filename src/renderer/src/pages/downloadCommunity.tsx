@@ -220,7 +220,7 @@ export default function CommunityPanel(props: { kind: string }): JSX.Element {
     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
       {/* 筛选行 */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
+        <div style={{ position: 'relative', flex: '1 1 180px', minWidth: 0 }}>
           <span style={{ position: 'absolute', left: 9, top: 8, opacity: 0.55, display: 'flex' }}>
             <IconSearch size={15} />
           </span>
@@ -240,7 +240,7 @@ export default function CommunityPanel(props: { kind: string }): JSX.Element {
         )}
         <input
           className="input"
-          style={{ width: 120 }}
+          style={{ flex: '0 1 120px', minWidth: 0 }}
           placeholder="游戏版本"
           value={gameVersion}
           onChange={(e) => setGameVersion(e.target.value)}
@@ -263,7 +263,7 @@ export default function CommunityPanel(props: { kind: string }): JSX.Element {
       </div>
 
       {/* 安装目标 + 状态 */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
         {props.kind !== 'modpack' && (
           <>
             <span className="t-cap">安装到</span>

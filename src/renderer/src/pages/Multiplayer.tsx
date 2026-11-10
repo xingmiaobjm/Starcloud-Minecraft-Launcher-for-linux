@@ -233,7 +233,7 @@ export default function MultiplayerPage(): JSX.Element {
           </button>
           {advancedOpen && (
             <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <label style={{ flex: 1, minWidth: 220 }}>
+              <label style={{ flex: '1 1 220px', minWidth: 0 }}>
                 <div className="t-cap" style={{ marginBottom: 4 }}>
                   昵称
                 </div>
@@ -255,7 +255,7 @@ export default function MultiplayerPage(): JSX.Element {
                   </button>
                 </div>
               </label>
-              <label style={{ minWidth: 180 }}>
+              <label style={{ flex: '0 1 180px', minWidth: 0 }}>
                 <div className="t-cap" style={{ marginBottom: 4 }}>
                   节点地区
                 </div>

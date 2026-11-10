@@ -791,7 +791,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
   }
 
   return (
-    <div className="page" style={{ maxWidth: 1500, height: '100%' }}>
+    <div className="page" style={{ height: '100%' }}>
       {banner !== null && (
         <div style={{ marginBottom: 12 }}>
           <InfoBar kind={banner.kind} onDismiss={() => setBanner(null)}>
@@ -801,7 +801,7 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
       )}
 
       {/* 好友 / 联机 两个板块同页：导航栏不再单列「联机」（Win 0.3.7 起并入好友页） */}
-      <div style={{ marginBottom: 12, width: 260 }}>
+      <div style={{ marginBottom: 12, width: 'min(260px, 100%)' }}>
         <Segmented<Section>
           value={section}
           options={[
@@ -831,11 +831,14 @@ export default function FriendsPage(props: { onGoLogin?: () => void }): JSX.Elem
         </div>
       ) : (
         <div
+          className="fr-split"
           style={{
             flex: 1,
             minHeight: 0,
             display: 'grid',
-            gridTemplateColumns: '300px 1fr',
+            // 左栏 300px 是首选值：窄窗口里由 .fr-split 的断点改成单列，
+            // 这里用 minmax 保证 220~300 之间还能自己收一点。
+            gridTemplateColumns: 'minmax(220px, 300px) minmax(0, 1fr)',
             gap: 12
           }}
         >

@@ -672,7 +672,8 @@ export default function VersionsPage(props: {
           gap: 8,
           alignItems: 'center',
           marginBottom: 14,
-          flexShrink: 0
+          flexShrink: 0,
+          flexWrap: 'wrap'
         }}
       >
         <div
@@ -690,7 +691,7 @@ export default function VersionsPage(props: {
         </button>
         <input
           className="input"
-          style={{ width: 210 }}
+          style={{ flex: '1 1 180px', minWidth: 0, maxWidth: 260 }}
           placeholder="搜索版本 / 类别"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
