@@ -18,6 +18,10 @@ Thumbs.db
 
 # 本地取证产物
 tools/output/
+.shots/
+
+# 临时分析脚本与中间产物
+.scratch/
 
 # AI 工具本地目录（不进版本库）
 .trae/
