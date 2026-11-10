@@ -74,8 +74,9 @@ export default function LaunchOverlay(props: {
     >
       <div
         style={{
-          width: 480,
-          maxWidth: '92%',
+          // 固定 480 在平铺 WM 的窄列里会溢出，用 min() 跟着窗口收
+          width: 'min(480px, 92%)',
+          maxWidth: '100%',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -100,7 +101,7 @@ export default function LaunchOverlay(props: {
         </div>
 
         {/* 进度条 */}
-        <div className="progress" style={{ width: 340, height: 4 }}>
+        <div className="progress" style={{ width: 'min(340px, 100%)', height: 4 }}>
           <div
             className="progress-fill"
             style={{ width: `${failed ? 100 : (s.progress ?? 6)}%` }}
@@ -110,7 +111,7 @@ export default function LaunchOverlay(props: {
         {/* 当前步骤 / 登录方式 */}
         <div
           style={{
-            width: 340,
+            width: 'min(340px, 100%)',
             display: 'grid',
             gridTemplateColumns: 'auto 1fr',
             rowGap: 4,
@@ -127,7 +128,7 @@ export default function LaunchOverlay(props: {
         {/* 小贴士 / 失败原因 */}
         <div
           className="card"
-          style={{ width: 340, padding: '10px 12px', display: 'flex', gap: 10 }}
+          style={{ width: 'min(340px, 100%)', padding: '10px 12px', display: 'flex', gap: 10 }}
         >
           <span
             style={{
@@ -158,7 +159,7 @@ export default function LaunchOverlay(props: {
             ref={logRef}
             className="log"
             style={{
-              width: 440,
+              width: 'min(440px, 100%)',
               height: 180,
               background: 'var(--surface-subtle)',
               borderRadius: 8,
@@ -172,7 +173,7 @@ export default function LaunchOverlay(props: {
         {/* 取消 / 关闭 */}
         <button
           className="btn"
-          style={{ minWidth: 240 }}
+          style={{ minWidth: 'min(240px, 100%)' }}
           onClick={() => {
             setShowLog(false)
             props.onCancel()

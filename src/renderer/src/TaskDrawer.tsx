@@ -91,8 +91,10 @@ export default function TaskDrawer(props: {
           top: 0,
           right: 0,
           bottom: 0,
-          width: 'min(720px, 52vw)',
-          minWidth: 420,
+          // 平铺 WM 下窗口可能只有 500px 宽：minWidth:420 会顶出屏幕，
+          // 所以改用 min() 同时约束上下限（窄窗口里直接铺满整宽）。
+          width: 'min(720px, max(420px, 52vw))',
+          maxWidth: '100vw',
           zIndex: 851,
           borderLeft: '1px solid var(--stroke-default)',
           boxShadow: 'var(--shadow-16)',
