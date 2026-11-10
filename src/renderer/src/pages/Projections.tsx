@@ -111,9 +111,11 @@ export default function ProjectionsPage(): JSX.Element {
         </button>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16 }}>
+      {/* 两栏用 .split 原语：平铺 WM 窄窗口自动转纵向，见 winui.css。
+          注意这里列表在左、面板在右，所以 aside 放右边（用 order 调整）。 */}
+      <div className="split">
         {/* 左：投影列表 */}
-        <div className="card card-flush" style={{ flex: 1, minWidth: 0 }}>
+        <div className="card card-flush split-main">
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px' }}>
             {loading && <SkeletonList rows={6} />}
             {!loading && files.length === 0 && (
@@ -155,12 +157,11 @@ export default function ProjectionsPage(): JSX.Element {
         </div>
 
         {/* 右：目标版本面板 */}
-        <div className="card" style={{ width: 370, flexShrink: 0, alignSelf: 'flex-start' }}>
+        <div className="card split-aside split-aside-xl">
           <div className="t-strong" style={{ marginBottom: 12 }}>
             目标版本
           </div>
           <Select
-            width={340}
             value={dest}
             options={[
               { value: '', label: '全局（共享目录）' },

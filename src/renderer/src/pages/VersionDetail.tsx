@@ -248,7 +248,7 @@ export default function VersionDetailPage(props: {
                   />
                   <Info label="隔离" value={detail.isolated ? '独立版本目录' : '共享 .minecraft'} />
                   <Info label="最近游玩" value={fmtTime(detail.lastPlayedAt)} />
-                  <div style={{ minWidth: 260 }}>
+                  <div style={{ flex: '1 1 260px', minWidth: 0 }}>
                     <div className="t-meta">实例目录</div>
                     <div className="t-body truncate">{detail.gameRoot}</div>
                   </div>
@@ -424,7 +424,7 @@ export default function VersionDetailPage(props: {
 
 function Info(props: { label: string; value: string }): JSX.Element {
   return (
-    <div style={{ minWidth: 150 }}>
+    <div style={{ flex: '1 1 150px', minWidth: 0 }}>
       <div className="t-meta">{props.label}</div>
       <div className="t-body">{props.value}</div>
     </div>
@@ -466,7 +466,8 @@ function UpdatesDialog(props: {
         </>
       }
     >
-      <div style={{ maxHeight: 380, overflowY: 'auto', minWidth: 520 }}>
+      {/* minWidth 在平铺窄窗口里会把弹层顶出屏幕：用 min() 跟着窗口收 */}
+      <div style={{ maxHeight: 380, overflowY: 'auto', minWidth: 'min(520px, 100%)' }}>
         {props.updates.map((u) => {
           const isDone = done.includes(u.fileName)
           return (
@@ -551,7 +552,7 @@ function DepsDialog(props: {
         </>
       }
     >
-      <div style={{ maxHeight: 380, overflowY: 'auto', minWidth: 520 }}>
+      <div style={{ maxHeight: 380, overflowY: 'auto', minWidth: 'min(520px, 100%)' }}>
         {clean && (
           <div className="info info-success">
             <IconCheck size={14} />
@@ -692,7 +693,7 @@ function InstanceSettingsDialog(props: {
         </>
       }
     >
-      <div style={{ maxHeight: 460, overflowY: 'auto', minWidth: 520 }}>
+      <div style={{ maxHeight: 460, overflowY: 'auto', minWidth: 'min(520px, 100%)' }}>
         <LabeledSelect
           label="版本隔离"
           value={isolation}
@@ -889,7 +890,7 @@ function SearchInstallDialog(props: {
         </button>
       }
     >
-      <div style={{ minWidth: 640 }}>
+      <div style={{ minWidth: 'min(640px, 100%)' }}>
         <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
           <input
             className="input"

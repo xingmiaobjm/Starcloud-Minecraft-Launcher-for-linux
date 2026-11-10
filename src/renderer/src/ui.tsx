@@ -393,7 +393,8 @@ export function Modal(props: {
         if (e.target === e.currentTarget) props.onClose()
       }}
     >
-      <div className="dialog" style={{ width: props.width ?? 480 }}>
+      {/* maxWidth 由 .dialog 的 min(480px, 94vw) 兜底，这里只放首选宽 */}
+      <div className="dialog" style={{ width: props.width ?? 'min(480px, 94vw)', maxWidth: '94vw' }}>
         <div className="dialog-title">{props.title}</div>
         <div className="dialog-body">{props.children}</div>
         {props.footer !== undefined && <div className="dialog-actions">{props.footer}</div>}
@@ -510,7 +511,12 @@ export function Select<T extends string>(props: {
   }
 
   return (
-    <div ref={rootRef} style={{ width: props.width ?? 220 }}>
+    // 宽度是"首选值"而非硬约束：flexShrink 让它在工具条里能被压缩，
+    // maxWidth:100% 兜住容器更窄的情况；弹层宽度取 rect.width，会跟着一起收。
+    <div
+      ref={rootRef}
+      style={{ width: props.width ?? 220, maxWidth: '100%', minWidth: 0, flexShrink: 1 }}
+    >
       <button
         className="input"
         style={{

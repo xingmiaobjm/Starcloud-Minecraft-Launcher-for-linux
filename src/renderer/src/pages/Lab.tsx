@@ -259,9 +259,10 @@ export default function LabPage() {
   return (
     <>
       <div className="page">
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16 }}>
+        {/* 两栏用 .split 原语：平铺 WM 窄窗口自动转纵向，见 winui.css */}
+        <div className="split">
           {/* 左栏：实验室工具（Win 端四项） */}
-          <div className="card" style={{ width: 220, flexShrink: 0, padding: 8, alignSelf: 'flex-start' }}>
+          <div className="card split-aside split-aside-stack" style={{ padding: 8 }}>
             {[
               { id: 'workshop', label: '投影工坊', icon: <IconList size={15} /> },
               { id: 'color', label: '彩色文字', icon: <IconSettings size={15} /> }
@@ -283,12 +284,15 @@ export default function LabPage() {
           </div>
 
           {section !== 'workshop' && (
-            <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <div className="split-main" style={{ minHeight: 0 }}>
               {section === 'color' && <ColorTextTool />}
             </div>
           )}
 
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', display: section === 'workshop' ? 'block' : 'none' }}>
+          <div
+            className="split-main split-main-scroll"
+            style={{ display: section === 'workshop' ? 'block' : 'none' }}
+          >
             {/* 投影工坊：路径 + 三个操作 + 文件列表 */}
             <div className="card" style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>

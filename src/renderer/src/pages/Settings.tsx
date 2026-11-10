@@ -294,9 +294,10 @@ export default function SettingsPage(props: {
 
   return (
     <div className="page">
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16 }}>
+      {/* 两栏用 .split 原语：平铺 WM 窄窗口自动转纵向，见 winui.css */}
+      <div className="split">
         {/* 左侧分类卡 */}
-        <div className="card" style={{ width: 230, flexShrink: 0, padding: 8, alignSelf: 'flex-start' }}>
+        <div className="card split-aside split-aside-stack" style={{ padding: 8 }}>
           {SECTIONS.map((item) => (
             <button
               key={item.id}
@@ -313,16 +314,7 @@ export default function SettingsPage(props: {
         </div>
 
         {/* 右侧内容 */}
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14
-          }}
-        >
+        <div className="split-main split-main-scroll" style={{ gap: 14 }}>
           {loading && <SkeletonList rows={3} />}
 
           {/* ══ 游戏 ══ */}
@@ -403,8 +395,8 @@ export default function SettingsPage(props: {
 
               <div className="card">
                 <SectionTitle>默认窗口</SectionTitle>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
-                  <div style={{ width: 160 }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 130px', minWidth: 0, maxWidth: 200 }}>
                     <Field label="窗口宽度">
                       <input
                         className="input"
@@ -414,7 +406,7 @@ export default function SettingsPage(props: {
                       />
                     </Field>
                   </div>
-                  <div style={{ width: 160 }}>
+                  <div style={{ flex: '1 1 130px', minWidth: 0, maxWidth: 200 }}>
                     <Field label="窗口高度">
                       <input
                         className="input"
@@ -468,7 +460,12 @@ export default function SettingsPage(props: {
                 {envEntries.length === 0 && <div className="t-cap">还没有环境变量。</div>}
                 {envEntries.map(([key, value]) => (
                   <div key={key} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                    <input className="input" style={{ width: 180 }} value={key} readOnly />
+                    <input
+                      className="input"
+                      style={{ flex: '0 1 180px', minWidth: 0, maxWidth: 240 }}
+                      value={key}
+                      readOnly
+                    />
                     <input
                       className="input"
                       style={{ flex: 1 }}
@@ -905,7 +902,7 @@ export default function SettingsPage(props: {
                 <Field label="设备名称" hint="留空 = 使用主机名">
                   <input
                     className="input"
-                    style={{ width: 320 }}
+                    style={{ width: '100%', maxWidth: 320 }}
                     value={s.deviceName}
                     onChange={(e) => set('deviceName', e.target.value)}
                   />

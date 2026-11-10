@@ -363,9 +363,12 @@ export default function PluginsPage(): JSX.Element {
         ) : panels.length === 0 ? (
           <div className="t-cap">该插件没有声明面板。</div>
         ) : (
-          <div style={{ display: 'flex', gap: 12, minHeight: 240 }}>
+          <div style={{ display: 'flex', gap: 12, minHeight: 240, flexWrap: 'wrap' }}>
             {panels.length > 1 && (
-              <div style={{ width: 160, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div
+                className="plugin-panel-nav"
+                style={{ flex: '0 1 160px', minWidth: 'min(140px, 100%)', display: 'flex', flexDirection: 'column', gap: 2 }}
+              >
                 {panels.map((panel) => (
                   <button
                     key={panel.id}
@@ -378,7 +381,7 @@ export default function PluginsPage(): JSX.Element {
                 ))}
               </div>
             )}
-            <div style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+            <div style={{ flex: '1 1 240px', minWidth: 0, overflowY: 'auto' }}>
               {panels.find((x) => x.id === activePanelId)?.declarative === false ? (
                 <div className="info info-warning">
                   <IconWarning size={14} />

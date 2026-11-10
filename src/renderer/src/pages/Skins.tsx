@@ -399,9 +399,11 @@ export default function SkinsPage(props: {
       )}
 
       <div className="page-body">
-        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+        {/* 两栏用 .split-fluid：外层 page-body 已经负责滚动，
+            平铺 WM 窄窗口自动转纵向堆叠（见 winui.css）。 */}
+        <div className="split split-fluid">
           {/* ── 左：3D 形象 + 当前皮肤信息与操作（Win 端 SkinPanel 左栏） ── */}
-          <div style={{ width: 340, minWidth: 340, flexShrink: 0 }}>
+          <div className="split-aside split-aside-lg">
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               <SkinFigure
                 texture={selected === null ? undefined : rawIcons[selected.id]}
@@ -545,7 +547,7 @@ export default function SkinsPage(props: {
           </div>
 
           {/* ── 右：我的皮肤（Win 卡片网格；首格「添加皮肤」，支持拖入 PNG 见下） ── */}
-          <div className="card card-flush" style={{ flex: 1, minWidth: 0 }}>
+          <div className="card card-flush split-main">
             <div className="card-head">
               <span className="card-title">我的皮肤</span>
               <span className="chip">{skins.length} 张</span>

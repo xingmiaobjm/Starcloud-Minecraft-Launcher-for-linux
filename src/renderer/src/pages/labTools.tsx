@@ -135,7 +135,7 @@ export function ColorTextTool(): JSX.Element {
               颜色
               <input
                 className="input"
-                style={{ width: 110 }}
+                style={{ flex: '0 1 110px', minWidth: 76 }}
                 value={hex}
                 onChange={(e) => setHex(e.target.value)}
                 placeholder="#FFD322"
@@ -153,12 +153,12 @@ export function ColorTextTool(): JSX.Element {
             <>
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
                 起色
-                <input className="input" style={{ width: 100 }} value={fromHex} onChange={(e) => setFromHex(e.target.value)} />
+                <input className="input" style={{ flex: '0 1 100px', minWidth: 72 }} value={fromHex} onChange={(e) => setFromHex(e.target.value)} />
                 <input type="color" value={/^#[0-9a-f]{6}$/i.test(fromHex) ? fromHex : '#ffd322'} onChange={(e) => setFromHex(e.target.value.toUpperCase())} style={{ width: 34, height: 30, padding: 2, background: 'transparent', border: 'none' }} />
               </label>
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
                 止色
-                <input className="input" style={{ width: 100 }} value={toHex} onChange={(e) => setToHex(e.target.value)} />
+                <input className="input" style={{ flex: '0 1 100px', minWidth: 72 }} value={toHex} onChange={(e) => setToHex(e.target.value)} />
                 <input type="color" value={/^#[0-9a-f]{6}$/i.test(toHex) ? toHex : '#00aaff'} onChange={(e) => setToHex(e.target.value.toUpperCase())} style={{ width: 34, height: 30, padding: 2, background: 'transparent', border: 'none' }} />
               </label>
             </>
@@ -175,7 +175,7 @@ export function ColorTextTool(): JSX.Element {
                   每
                   <input
                     className="input"
-                    style={{ width: 56 }}
+                    style={{ flex: '0 1 56px', minWidth: 44 }}
                     type="number"
                     min={1}
                     value={segment}

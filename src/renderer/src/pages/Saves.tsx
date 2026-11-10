@@ -276,7 +276,7 @@ export default function SavesPage(props: {
         <div style={{ width: 1, height: 24, background: 'var(--stroke-divider)' }} />
         <input
           className="input"
-          style={{ width: 220 }}
+          style={{ flex: '1 1 180px', minWidth: 0, maxWidth: 260 }}
           placeholder="搜索世界 / 版本"
           value={query}
           onChange={(e) => setQuery(e.target.value)}

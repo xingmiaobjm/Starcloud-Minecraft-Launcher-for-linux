@@ -271,7 +271,9 @@ input, textarea, .selectable { user-select: text; }
   align-items: center;
   gap: 10px;
   padding: 0 12px;
-  min-width: 220px;
+  /* 首选 220px，但允许被压缩：窗口被 WM 压窄时先收品牌区，不挤中间标题 */
+  flex: 0 1 220px;
+  min-width: 0;
 }
 .tb-brand {
   width: 18px;
@@ -284,6 +286,10 @@ input, textarea, .selectable { user-select: text; }
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
+  /* 品牌区被压缩时省略而不是溢出（窄档整块会被隐藏） */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tb-ver {
   font-size: 11px;
@@ -1031,7 +1037,8 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 380px;
+  /* 380px 是首选宽：窄窗口里让位给视口，否则通知会顶出右边界 */
+  max-width: min(380px, calc(100vw - 40px));
   pointer-events: none;
 }
 .toast { pointer-events: auto; box-shadow: var(--shadow-16); }
@@ -1048,7 +1055,8 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
   animation: fadeIn var(--t-exit) var(--e-fade) both;
 }
 .dialog {
-  width: 480px;
+  /* 首选 480px，上限跟视口走：平铺 WM 把窗口压到 600px 宽时不该顶出屏幕 */
+  width: min(480px, 92vw);
   max-width: 92vw;
   max-height: 84vh;
   overflow-y: auto;
@@ -1081,7 +1089,9 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
   backdrop-filter: blur(40px) saturate(160%);
   border: 1px solid var(--stroke-default);
   box-shadow: var(--shadow-flyout);
-  min-width: 180px;
+  /* 首选 180px 但可收缩：下拉挂在输入框上，宽度由调用方 rect.width 决定 */
+  min-width: min(180px, 100%);
+  max-width: calc(100vw - 16px);
   animation: slideUp var(--t-exit) var(--e-enter) both;
 }
 
@@ -1098,7 +1108,7 @@ textarea.input { height: auto; min-height: 64px; padding: 8px 10px; resize: vert
   top: 56px; /* 顶栏 48 + 8 */
   right: 12px;
   z-index: 895;
-  width: 440px;
+  width: min(440px, calc(100vw - 24px));
   max-height: calc(100vh - 68px);
   display: flex;
   flex-direction: column;
@@ -1467,4 +1477,201 @@ input[type='range']::-moz-range-thumb {
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-primary);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   自适应布局（平铺窗口管理器：niri 滚动布局 / Hyprland / sway）
+   ═══════════════════════════════════════════════════════════════════════
+   平铺 WM 不尊重"窗口偏好尺寸"：niri 把窗口塞进一列（列宽可窄到 500px），
+   Hyprland 的 dwindle/master 会把窗口切成半屏甚至四分之一屏。窗口实际宽度
+   由 WM 决定，设计稿的 1360 只是"首选尺寸"。
+
+   所以所有写死的像素宽都必须能按视口宽度收放。做法是把"两栏"抽成布局原语
+   （下面的 .split 系列），页面不再各自写 `display:flex` + 固定 width——
+   内联 style 没有媒体查询能力，改不动。
+
+   三档断点（与 renderer/src/layout.ts 的 COMPACT_MAX / NARROW_MAX 一致）：
+     wide     > 1180px   对齐 Win 端 1360 设计稿
+     compact  ≤ 1180px   侧栏收窄、内边距减小
+     narrow   ≤ 900px    两栏改纵向堆叠、弹层贴边、标题栏精简
+     tiny     ≤ 620px    niri 单列窄栏 / 分屏三分之一
+   另一维：max-height 640px（niri 横向滚动会把窗口压得很矮）
+
+   ── 用法 ──────────────────────────────────────────────────────────────
+     <div className="split">
+       <aside className="split-aside split-aside-lg">…</aside>
+       <div className="split-main">…</div>
+     </div>
+   侧栏宽度变体：split-aside-sm(200) / 默认(240) / -lg(340) / -xl(370)。
+   侧栏内容是导航列表时加 .split-aside-stack，narrow 档自动横向铺开。
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+}
+/* 侧栏宽度跟视口一起收放（clamp 而非写死）：1360 时接近 Win 设计稿，
+   窗口被平铺 WM 压到 950 时自动收到下限，不靠断点硬切。 */
+.split-aside {
+  width: clamp(180px, 18vw, 240px);
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+.split-aside-sm { width: clamp(150px, 15vw, 200px); }
+.split-aside-lg { width: clamp(240px, 26vw, 340px); }
+.split-aside-xl { width: clamp(260px, 28vw, 360px); }
+.split-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* 主区自己滚动（narrow 档转纵向后由 .split 统一滚） */
+.split-main-scroll { min-height: 0; overflow-y: auto; }
+/* 嵌在 .page-body 里的两栏（Skins）：外层已经在滚，自己不占满高、不再滚动 */
+.split-fluid {
+  flex: none;
+  align-items: flex-start;
+  min-height: 0;
+}
+
+/* ── 文字自适应（全档位通用）─────────────────────────────────────────── */
+/* 中文长串（版本 ID、路径、模组名）没有空格可断，窄栏里会直接顶破容器。
+   anywhere 只在需要时才断词，不影响宽档下的正常排版。 */
+.t-body, .t-strong, .t-cap, .t-meta {
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-break: auto;
+}
+/* 小字号（11/12px）在 Windows 字体栈下容易糊成一片：补一点字距与行高 */
+.t-meta { line-height: 1.5; letter-spacing: 0.01em; }
+.t-cap { line-height: 1.55; letter-spacing: 0.005em; }
+/* 列表行里的次要说明（发布 · 类型）在窄档允许换行，不再靠 truncate 硬裁 */
+.row .t-meta { min-width: 0; }
+/* 代码/路径类文本：等宽字体本身很宽，允许任意位置断行 */
+.t-mono, code, .log { overflow-wrap: anywhere; }
+
+/* ── compact：≤1180px ────────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+  /* 标题栏：版本号是纯装饰，先让位给页面名 */
+  .tb-lead { min-width: 0; padding: 0 8px; }
+  .tb-ver { display: none; }
+
+  /* 内容区：24px 四边内边距在半屏里太奢侈（Win 端 Grid Padding=24） */
+  .content { padding: 18px; }
+
+  /* 侧栏宽度由上面的 clamp(vw) 自动收，这里不再覆写固定值 */
+  .split { gap: 12px; }
+
+  .card { padding: 14px; }
+}
+
+/* ── narrow：≤900px（Hyprland 半屏 / niri 窄列） ─────────────────────── */
+@media (max-width: 900px) {
+  .content { padding: 14px; }
+
+  /* 两栏改纵向堆叠：外层统一滚动，内部不再各自 overflow */
+  .split {
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    gap: 12px;
+    padding-right: 2px;
+  }
+  /* 已经在 page-body 里滚的两栏：只换方向，不抢滚动权 */
+  .split-fluid { overflow: visible; padding-right: 0; }
+  .split-aside {
+    width: 100%;
+    align-self: stretch;
+  }
+  /* 导航型侧栏纵向堆叠时不该再撑满一屏：改为横向流式铺开，
+     否则 8 个导航项竖排要吃掉 300px 高度，正文被挤到看不见。 */
+  .split-aside-stack {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+  /* Download 的导航项外面还包了一层分组 div，用 display:contents 让
+     按钮直接成为 flex 项参与换行，同时保留 DOM 结构。 */
+  .split-aside-stack > div { display: contents; }
+  .split-aside-stack > * { flex: 0 0 auto; }
+  .split-aside-stack .t-cap {
+    flex-basis: 100%;
+    padding: 4px 6px 0;
+    font-size: 11px;
+  }
+  .split-aside-stack .nav-item {
+    width: auto !important;
+    height: 32px !important;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .split-main { flex: 1 0 auto; overflow: visible; }
+  .split-main-scroll { overflow-y: visible; }
+
+  /* 页面标题 26px 在 600px 宽里抢空间 */
+  .page-title { font-size: 20px; }
+  .page-head { gap: 10px; padding-bottom: 10px; flex-wrap: wrap; }
+
+  /* 好友页：会话列表 + 聊天两栏。窄窗口里 300px 固定左栏会把聊天挤没，
+     改成上下堆叠（会话列表限高，聊天占余下空间）。 */
+  .fr-split {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 220px) minmax(0, 1fr);
+  }
+
+  /* 标题栏：连应用名也收掉，只留 logo 与页面名 */
+  .tb-appname { display: none; }
+
+  /* 弹层：固定 480/440 宽在窄窗口会顶出屏幕 */
+  .dialog { width: min(480px, 94vw); max-height: 88vh; padding: 16px; }
+  .nova-flyout {
+    width: min(440px, calc(100vw - 16px));
+    right: 8px;
+    top: calc(var(--titlebar-h) + 4px);
+    max-height: calc(100vh - var(--titlebar-h) - 16px);
+  }
+
+  /* 分段控件：330px 固定宽改为自适应 */
+  .seg { width: auto; min-width: 0; }
+  .seg-item { font-size: 12px; }
+
+  /* 卡片头部操作按钮在窄档允许换行 */
+  .card-head { flex-wrap: wrap; gap: 6px; }
+
+  /* 表格类（版本详情里的依赖列表）允许横向滚动而不是撑破布局 */
+  .dialog-body { overflow-x: auto; }
+
+  /* 窄档排版：行内元素之间留白收紧，字号只降一档，别把层级压平 */
+  .row { gap: 8px; padding: 10px 6px; }
+  .t-strong { font-size: 13px; }
+  .t-body { font-size: 12.5px; }
+  .t-cap { font-size: 11.5px; }
+  /* 卡片标题在窄档跟着收，避免与右侧操作按钮抢同一行 */
+  .card-title { font-size: 15px; }
+  /* 分段控件里的中文标签在窄档容易挤出格子：允许单行省略 */
+  .seg-item { padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ── tiny：≤620px（niri 单列窄栏 / 分屏三分之一） ───────────────────── */
+@media (max-width: 620px) {
+  .content { padding: 10px; }
+  .page-title { font-size: 18px; }
+  /* 标题栏按钮挤在一起会误点：缩小命中区而不是隐藏（隐藏就没法关窗） */
+  .tb-btn { width: 38px; }
+  .split { gap: 10px; }
+  /* 启动浮层的固定 480 宽在 620px 窗口里会溢出 */
+  .log { max-width: 100%; }
+}
+
+/* ── short：≤640px 高（niri 横向滚动 / 超宽分栏） ───────────────────── */
+@media (max-height: 640px) {
+  .content { padding-top: 12px; padding-bottom: 12px; }
+  .page-head { padding-bottom: 8px; }
+  .card { padding: 12px; }
 }
