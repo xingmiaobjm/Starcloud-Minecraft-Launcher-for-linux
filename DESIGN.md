@@ -996,6 +996,86 @@ MaxWidth 1280 → Grid ColumnSpacing="16"
 
 > 根 `DESIGN.md` §10 写抽屉 432px，`MainWindow.xaml` 实际为 **600px**。以代码为准。
 
+### 7.5 自适应档位（平铺窗口管理器）
+
+Windows 端窗口由用户拖拽决定尺寸，Linux 端不一定：niri 的滚动布局、Hyprland 的
+dwindle/master、sway 都会把窗口塞进 WM 算出的格子里。用户在 niri 里把一列拉窄到
+600px，界面就得在 600px 下仍然可用。
+
+四档，断点定义在 `src/renderer/src/layout.ts`，样式落在 `winui.css` 文件末尾的
+`@media` 块。**档位判定只有一处来源**：组件要按宽度分支时用 `useLayout()`，不要在
+组件里各自 `window.innerWidth`，否则同一次 resize 里两个组件可能算出不同档位。
+
+| 档位 | 宽度 | 处理 |
+| --- | --- | --- |
+| wide | > 1180 | 原样，对齐 1360 设计稿 |
+| compact | ≤ 1180 | 内边距 24→18、卡片内边距 16→14、导航强制收起且展开键置灰、标题栏版本徽标隐藏（侧栏宽度不在这里改，由 clamp 连续收） |
+| narrow | ≤ 900 | 两栏 `flex-direction: column` 纵向堆叠、导航型侧栏改横向流式铺开、页面标题 26→20、好友页两栏改上下、小字号微调（见下） |
+| tiny | ≤ 620 | 内边距 14→10、页面标题 20→18、标题栏按钮 46→38 |
+
+另有正交的高度档：`@media (max-height: 640px)` 收紧纵向内边距与卡片内边距（niri 的
+滚动列可能又窄又矮）。
+
+**布局原语**（页面一律用它们，不要写内联固定宽——内联宽会盖掉断点）：
+
+| 类 | 作用 |
+| --- | --- |
+| `.split` | 两栏容器。narrow 档自动转纵向并接管滚动 |
+| `.split-aside` | 侧栏，`width: clamp(180px, 18vw, 240px)`。变体 `-sm` `clamp(150px,15vw,200px)`、`-lg` `clamp(240px,26vw,340px)`、`-xl` `clamp(260px,28vw,360px)`。宽度随视口连续收，不靠断点跳变 |
+| `.split-main` | 主区，`flex:1; min-width:0`（`min-width:0` 是必需的，否则子元素把父级撑破） |
+| `.split-main-scroll` | 主区自己滚动（不靠 `.split` 接管时用） |
+| `.split-fluid` | 嵌在已可滚动的 `.page-body` 里的两栏，narrow 档不抢滚动权 |
+| `.split-aside-stack` | 导航型侧栏（一组按钮）。narrow 档横向流式铺开，否则 8 个导航项竖排要吃掉 300px 高度 |
+
+### 7.6 宽度一律自适应
+
+除图标、头像、色块、分隔线这类图形尺寸（都 < 100px），**界面里不存在"硬宽"**。
+每个原本写死像素的宽度都按同一套规则改写：
+
+| 场景 | 写法 |
+| --- | --- |
+| 工具条里的搜索框 / Select | `flex: '1 1 180px', minWidth: 0, maxWidth: 260` —— 首选 180，容器窄了自己收 |
+| 分组控件（`Segmented`） | `flex: '0 1 330px', minWidth: 'min(240px, 100%)'` |
+| 输入框（窗口宽高、环境变量键名） | `flex: '1 1 130px', minWidth: 0, maxWidth: 200`，外层加 `flexWrap: 'wrap'` |
+| 弹层（对话框 / Select 下拉 / Nova 面板 / 抽屉 / Toast） | `width: min(首选宽, 可用宽度)`，例如 `.dialog { width: min(480px, 92vw) }` |
+| 栅格（好友页两栏、运行页键值行） | `minmax(下限, 首选)`，narrow 档整行改单列 |
+| 图标 / 头像 / 色块 | 保持固定像素（这是图形尺寸，不是布局宽度） |
+
+`ui.tsx` 里 `Select` 的 `width` 参数语义已经改成"首选值"：根 div 是
+`width: props.width ?? 220, maxWidth: '100%', minWidth: 0, flexShrink: 1`，
+弹层宽度取 `rect.width` 会跟着一起收。
+
+**小字号排版**（11/12px 在中文长串下最容易翻车）：
+
+- `.t-body / .t-strong / .t-cap / .t-meta` 统一 `overflow-wrap: anywhere` —— 版本 ID、
+  路径、模组名没有空格可断，否则直接顶破容器。
+- `.t-meta` 行高 1.5、字距 0.01em；`.t-cap` 行高 1.55 —— 小字号靠行高撑可读性，
+  不要靠加粗。
+- `.t-mono / code / .log` 允许任意位置断行（等宽字体本身更宽）。
+- narrow 档微调：`.t-strong` 14→13、`.t-body` 13→12.5、`.t-cap` 12→11.5、
+  `.card-title` 16→15，`.row` 间距收紧。
+- 需要单行显示的地方一律配 `.truncate`（`text-overflow: ellipsis`），
+  不让文本被悄悄裁掉半截。
+
+**验证**（两个脚本，都可挂 CI，退出码非 0 即失败）：
+
+```bash
+npx electron-vite build
+npx electron tools/shot-responsive.cjs   # 13 页 × 4 档位，逐页布局
+npx electron tools/probe-overlays.cjs    # 对话框 / Select 弹层 / Nova 面板 / 抽屉
+```
+
+- `shot-responsive.cjs` 输出 `layout-report.json`，除横向溢出外还查两类问题：
+  `hardWidths`（内联写死 ≥100px 且没被百分比 `max-width` 兜住）与
+  `textClipped`（文本溢出但没配省略号，等于内容被吃掉）。可用 `SHOT_SIZES`、
+  `SHOT_PAGES`、`SHOT_SIGNED_IN=1`（造好友页两栏内容）等环境变量裁剪。
+- `probe-overlays.cjs` 覆盖只在交互后才挂载的浮层，默认 1360 / 860 / 480 三档。
+- 无 GPU 的环境（容器、CI）需要 `app.disableHardwareAcceleration()`，否则
+  `capturePage()` 只能拿到 0 字节 PNG —— 脚本已处理，布局正确性靠 DOM 度量而非截图。
+- 隐藏窗口不跑合成器动画，带 `both` 填充的 keyframes 会卡在 `from` 帧（量出来是
+  整体偏移 24px 的假越界），两个脚本都在度量前调
+  `document.getAnimations().forEach(a => a.finish())`。
+
 ---
 
 ## 8. 迁移检查清单
