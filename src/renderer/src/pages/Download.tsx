@@ -177,9 +177,10 @@ export default function DownloadPage(): JSX.Element {
 
   return (
     <div className="page">
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16 }}>
-        {/* 左侧子导航卡（Win 端 260 宽） */}
-        <div className="card" style={{ width: 240, flexShrink: 0, padding: 8 }}>
+      {/* 两栏用 .split 原语：窄窗口（平铺 WM）自动转纵向堆叠，见 winui.css */}
+      <div className="split">
+        {/* 左侧子导航卡（Win 端 260 宽；平铺窄档收窄后横向铺开） */}
+        <div className="card split-aside split-aside-stack" style={{ padding: 8 }}>
           {subNav.map((item) => (
             <div key={item.id}>
               {item.group !== undefined && (
@@ -203,16 +204,19 @@ export default function DownloadPage(): JSX.Element {
 
         {/* 右侧内容 */}
         <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            display: section === 'vanilla' ? 'flex' : 'none',
-            flexDirection: 'column'
-          }}
+          className="split-main"
+          style={{ display: section === 'vanilla' ? 'flex' : 'none' }}
         >
-          {/* 顶部：分段 + 搜索 + 缓存 */}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }}>
-            <div className="seg" style={{ width: 330, gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          {/* 顶部：分段 + 搜索 + 缓存（分段首选 330，窄窗口跟着搜索框一起收） */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+            <div
+              className="seg"
+              style={{
+                flex: '0 1 330px',
+                minWidth: 'min(240px, 100%)',
+                gridTemplateColumns: 'repeat(3, 1fr)'
+              }}
+            >
               <div
                 className="seg-ind"
                 style={{
@@ -336,7 +340,7 @@ export default function DownloadPage(): JSX.Element {
                         </div>
                       </div>
                       {installing ? (
-                        <div style={{ width: 150, flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                        <div style={{ flex: '0 0 150px', maxWidth: '38%', display: 'flex', alignItems: 'center' }}>
                           <ProgressBar
                             value={
                               progress !== null && progress.total > 0

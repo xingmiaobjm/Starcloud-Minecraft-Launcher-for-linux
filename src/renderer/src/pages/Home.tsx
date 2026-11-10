@@ -305,12 +305,11 @@ export default function HomePage(props: {
     <div className="page">
       {/* 首页不放页面大标题（Win 端首页直接从卡片开始） */}
 
-      {/* 满高两栏：卡片撑满窗口高度、列表在卡内滚动（对齐 Win 端 HomePage） */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 24 }}>
+      {/* 满高两栏：卡片撑满窗口高度、列表在卡内滚动（对齐 Win 端 HomePage）。
+          用 .split 原语：平铺 WM 把窗口压窄时自动转纵向堆叠（见 winui.css）。 */}
+      <div className="split" style={{ gap: 24 }}>
           {/* ── 左栏（*）：启动自检 → 版本列表 ── */}
-          <div
-            style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-          >
+          <div className="split-main">
             {/* 启动自检卡片已移除：Win 端首页只在必要时短暂提示，不常驻占位 */}
             <div className="card card-flush" style={{ flex: 1, minHeight: 0 }}>
               <div className="card-head">
@@ -421,16 +420,9 @@ export default function HomePage(props: {
           {/* ── 右栏（360）：账户 / 启动 ──
               minWidth: 0 必须要有：flex 子项默认 min-width:auto，遇到不可换行的
               长文本（例如桥接错误信息）会被顶宽，把整栏挤出窗口。 */}
-          <div
-            style={{
-              width: 360,
-              minWidth: 360,
-              maxWidth: 360,
-              flexShrink: 0,
-              minHeight: 0,
-              display: 'flex'
-            }}
-          >
+          {/* 宽度由 .split-aside-xl 控制（360）；inline width 会盖掉窄档断点，
+              所以这里不写 width，只让它在纵向堆叠时撑满。 */}
+          <div className="split-aside split-aside-xl" style={{ alignSelf: 'stretch', display: 'flex' }}>
             <div
               className="card"
               style={{
