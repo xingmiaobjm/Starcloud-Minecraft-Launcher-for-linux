@@ -139,11 +139,14 @@ function createWindow(): BrowserWindow {
   // 让内容区背景与窗口背景色一致：透明窗口在部分 WM 下会漏出黑边
   const background = nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#f3f3f3'
 
+  // 平铺窗口管理器（niri 滚动布局 / Hyprland / sway）下窗口尺寸由 WM 决定，
+  // minWidth 是硬约束：给 1000 会让用户无法把窗口塞进窄栏（单列/半屏分栏）。
+  // 480 是渲染层窄档断点（winui.css 的 @media (max-width:620px)）能兜住的下限。
   const win = new BrowserWindow({
     width: 1360,
     height: 880,
-    minWidth: 1000,
-    minHeight: 640,
+    minWidth: 480,
+    minHeight: 420,
     show: false, // 防首帧闪烁（坑点 2）
     backgroundColor: background, // 不用 transparent：坑点 1（圆角/边缘异色）
     autoHideMenuBar: true,

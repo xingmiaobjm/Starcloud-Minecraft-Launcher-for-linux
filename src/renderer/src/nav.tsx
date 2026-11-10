@@ -19,7 +19,9 @@
 ///
 /// 用字形字体而不是 Unicode 符号：符号字形来自系统 fallback 字体，
 /// 与 Win 端的鸿蒙图标库不是同一套画风，混用会显得拼凑。
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+
+import { useLayout } from './layout'
 
 import labIcon from './assets/brand/lab-nav.svg'
 import labIconDark from './assets/brand/lab-nav-dark.svg'
@@ -86,7 +88,18 @@ export default function Nav(props: {
   running: boolean
   onNavigate: (key: PageKey) => void
 }): JSX.Element {
-  const [open, setOpen] = useState(false)
+  // 用户手动展开的意图。真正的展开与否还要看窗口宽度：
+  // 平铺 WM（niri/Hyprland）会把窗口压到 900px 以下，232px 的展开导航
+  // 会吃掉四分之一屏宽，此时无论用户上次怎么选都强制收起。
+  const [wantOpen, setWantOpen] = useState(false)
+  const layout = useLayout()
+  const open = wantOpen && !layout.compact
+
+  // 从宽窗口拖窄后，把"想展开"的意图清掉：否则再拖宽会突然弹开，
+  // 与用户当时的操作预期不符。
+  useEffect(() => {
+    if (layout.compact && wantOpen) setWantOpen(false)
+  }, [layout.compact, wantOpen])
 
   const icon = (spec: IconSpec): JSX.Element => {
     if (spec.kind === 'brand') {
@@ -133,9 +146,16 @@ export default function Nav(props: {
       {/* NavigationView 的 hamburger：展开 / 收起（Win 端 OpenPaneLength=232） */}
       <button
         className="nav-mode"
-        title={open ? '收起导航' : '展开导航'}
+        title={
+          layout.compact
+            ? '窗口过窄，导航已自动收起'
+            : open
+              ? '收起导航'
+              : '展开导航'
+        }
         aria-label={open ? '收起导航' : '展开导航'}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setWantOpen((v) => !v)}
+        disabled={layout.compact}
       >
         <span className="nav-icon" style={{ fontFamily: 'var(--font-icon)' }}>
           {open ? '' : ''}
